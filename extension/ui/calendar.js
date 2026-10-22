@@ -14,6 +14,11 @@
 
   var doc = null;
   var view, sel, edit, wasted, delConfirm, authOpen = false, authView = null;
+  /* 「正在填补录表单」的标记。语义与 edit 并列，但必须单独一个：
+   * renderAdd 不写 edit（补录的是还没有 batchId 的新批次），于是后台任何一次写入
+   * 触发的 onChanged 重画都会把表单连同已输入的内容冲掉 —— 而 service worker
+   * 每次唤醒都可能写一次存储。同理 renderDetail 在 adding 时也不能动 #detail。 */
+  var adding = false;
   var confirmTimer = null;
   // 样本详情的展开状态（key -> true）与当前渲染出来的样本列表（供导出按钮回查）。
   // 响应体最大 200KB 一条、最多 60 条，全量塞进 DOM 会直接把扩展页卡死，
@@ -111,7 +116,7 @@
         var typing = document.activeElement && document.activeElement.tagName === "INPUT"
           && document.activeElement.closest && document.activeElement.closest("#authBody");
         if (authOpen && !authView && !typing) renderAuth();
-        if (!edit && !authOpen) render();
+        if (!edit && !adding && !authOpen) render();
         else renderCards(), renderFresh(), renderNotice();
       });
     });
@@ -319,6 +324,9 @@
 
   function renderDetail() {
     var box = $("#detail");
+    // 正在填补录表单：谁也别动这块 DOM。重画一次就等于把用户刚敲的内容扔掉，
+    // 而 storage 变更、同步结果、定时刷新都会走到这里。
+    if (adding) return;
     if (edit) return renderEdit(box, byId(edit));
     if (wasted) return renderWasted(box, wasted);
 
@@ -687,9 +695,11 @@
     var p = a && a.probe;
     if (!p) return "";
     function row(k, vHtml) { return '<div class="r"><span>' + esc(k) + "</span><span>" + vHtml + "</span></div>"; }
+    // 标题与正文共用 lib/diagnose.js 的口径：同一个探针不会出现「标题说读到了、
+    // 结论说流程出错」这种自相矛盾的两句话。
+    var v = CreditDiagnose.verdict(p);
 
     if (p.mode === "direct") {
-      var okd = p.outcome === "direct" || p.outcome === "direct-dup";
       var attemptsD = (p.attempts || []).map(function (x) {
         return (x.visible ? "可见页" : "隐藏页") + " · " + Math.round((x.ms || 0) / 1000) + "s"
           + (x.seen ? " · 页面内请求已执行" : " · 没执行成功")
@@ -697,8 +707,8 @@
           + (x.tabUrl && x.tabUrl !== a.consoleUrl ? "，最终停在 " + esc(x.tabUrl) : "");
       }).join("<br>") || "无";
       return '<div style="margin:12px 0 6px;font-size:13px;font-weight:600;color:'
-        + (okd ? "#047857" : "#b91c1c") + '">最近一次「刷新余额」的诊断 · '
-        + (okd ? (p.outcome === "direct" ? "读到并入库" : "读到但余额没变") : "没读到数据") + "</div>"
+        + (v.ok ? "#047857" : "#b91c1c") + '">最近一次「刷新余额」的诊断 · '
+        + v.text + "</div>"
         + '<div class="sec-b diag">'
         + row("取数方式", "页面内直读（MAIN world，不装钩子）")
         + row("接口", esc(p.endpoint || a.endpoint || "未记录"))
@@ -713,12 +723,8 @@
     }
 
     // 代发成功也算读到了：数据是扩展在页面里现取回来的，不是缓存。
-    // 只按 outcome 判会让标题写「没读到」、下面结论写「已入库」——同一屏两句话互相打架。
+    // 口径见 CreditDiagnose.verdict（error / both-failed / 代发成功三种情况分开算）。
     var fbOk = !!(p.fallback && p.fallback.ok);
-    var ok = p.outcome !== "both-failed" || fbOk;
-    var verdict = p.outcome !== "both-failed"
-      ? "读到了页面响应"
-      : (fbOk ? "页面没发请求，代发读到了" : "没读到（隐藏页和可见页都试过了）");
     var attempts = (p.attempts || []).map(function (x) {
       return (x.visible ? "可见页" : "隐藏页") + " 等 " + Math.round((x.ms || 0) / 1000) + "s，"
         + (x.seen ? (x.changed ? "截到新内容" : "有响应但内容没变") : "没等到")
@@ -726,8 +732,8 @@
         + (x.tabUrl && x.tabUrl !== a.consoleUrl ? "，最终停在 " + esc(x.tabUrl) : "");
     }).join("<br>") || "无";
     return '<div style="margin:12px 0 6px;font-size:13px;font-weight:600;color:'
-      + (ok ? "#047857" : "#b91c1c") + '">最近一次「刷新余额」的诊断 · '
-      + verdict + "</div>"
+      + (v.ok ? "#047857" : "#b91c1c") + '">最近一次「刷新余额」的诊断 · '
+      + v.text + "</div>"
       + '<div class="sec-b diag">'
       + row("钩子注入", p.hookAt ? "MAIN world 已起来 " + esc(hm(p.hookAt))
                                  : (p.relayAt ? "只有中转脚本，MAIN world 被挡" : "没起来"))
@@ -863,6 +869,13 @@
       : "file:// 预览模式 · 数据存在本机 localStorage";
   }
 
+  /* ---------- 页脚：备份、恢复与清空 ---------- */
+
+  /* 清空是唯一不可恢复的操作，所以走和"删一笔批次"同一套两段式确认：
+   * 第一次点只改文案并给 5 秒窗口，第二次才真删。需求 §4.3 对删一笔都要求确认，
+   * 删全部却一键执行，这是这条路上最不对称的地方。 */
+  var wipeArmed = false, wipeTimer = null;
+
   function renderFoot() {
     $("#foot").innerHTML =
       "<b>已实现的规则</b><br>"
@@ -870,17 +883,110 @@
       + "④ 每个 agent 有取数档位；⑤ 已过期批次降饱和加删除线、不计入可用余额；⑥ 抓取结果可手动修正，"
       + "改过的批次冻结并由你裁决冲突；⑦ 时间措辞按档位区分；⑧ 行内两段式删除；⑨ 已过期未用完沉没成本。<br>"
       + "<b>还没做的</b>：到期通知；.ics 导出。<br>"
-      + '<a href="#" id="wipe" style="color:var(--ink-3)">清空本机数据重新开始</a>';
+      + '<a href="#" id="wipe" style="color:' + (wipeArmed ? "#b91c1c" : "var(--ink-3)") + '">'
+      + (wipeArmed ? "确认清空全部数据？再点一次（批次 / 样本 / 授权配置都会删掉）"
+                   : "清空本机数据重新开始")
+      + "</a>"
+      + '<span style="color:var(--ink-3)"> · </span>'
+      + '<a href="#" id="impLink" style="color:var(--ink-3)">导入备份（JSON）</a>'
+      + '<input type="file" id="impFile" accept=".json,application/json" hidden>';
+
+    $("#impLink").onclick = function (e) { e.preventDefault(); $("#impFile").click(); };
+    $("#impFile").onchange = function () {
+      var f = this.files && this.files[0];
+      this.value = "";                 // 清空 value，才能连续导入同一个文件
+      if (f) readImport(f);
+    };
+
     $("#wipe").onclick = function (e) {
       e.preventDefault();
+      if (!wipeArmed) {
+        wipeArmed = true; renderFoot();
+        clearTimeout(wipeTimer);
+        wipeTimer = setTimeout(function () { wipeArmed = false; renderFoot(); }, 5000);
+        toast("这一步会删掉全部批次、捕获样本和四个平台的授权配置，无法撤销。要留底就先「导出全部数据」。");
+        return;
+      }
+      clearTimeout(wipeTimer); wipeArmed = false;
       Store.wipe().then(function () { location.reload(); });
     };
+  }
+
+  /**
+   * 导入备份。需求 §3.3 承诺的恢复路径，之前只有导出没有导入 ——
+   * 所以「清空本机数据」之后用户其实无路可退，连"把导出的 JSON 贴回来"都做不到。
+   *
+   * 为什么先清洗再合并，而不是直接 Store.save(parsed)：文件是用户可以手改的，
+   * 一个坏字段就能把 doc 结构打烂（batches 不是数组 → renderCal 抛错 → 整页白屏，
+   * 而用户只会以为"导入没生效"）。清洗规则在 lib/normalize.js 的 importSnapshot。
+   *
+   * 合并语义：按 dedupKey 补缺，同键以**现有数据为准**（导入是恢复/拼接，
+   * 不是覆盖 —— 现有数据通常更新，而且覆盖等于又造了一条不可恢复的路径）。
+   */
+  function readImport(file) {
+    if (file.size > 8 * 1024 * 1024) { toast("文件太大（超过 8MB），不像是本扩展导出的数据"); return; }
+    var fr = new FileReader();
+    fr.onerror = function () { toast("读文件失败：" + ((fr.error && fr.error.message) || "未知错误")); };
+    fr.onload = function () {
+      var raw;
+      try { raw = JSON.parse(String(fr.result || "")); }
+      catch (e) { toast("这个文件不是合法 JSON：" + ((e && e.message) || "解析失败")); return; }
+      applyImport(raw);
+    };
+    fr.readAsText(file);
+  }
+
+  function applyImport(raw) {
+    var clean;
+    try { clean = N.importSnapshot(raw, { agents: ORDER() }); }
+    catch (e) { toast("这份备份的格式看不懂：" + ((e && e.message) || "")); return; }
+
+    if (!clean.batches.length && !clean.captures.length) {
+      toast("这份文件里没有能导入的批次或样本 —— 是别的应用导出的数据吗？");
+      return;
+    }
+
+    var stats = { addedB: 0, dupB: 0, addedC: 0 };
+    function merge(f) {
+      // commit 会先在内存 doc 上跑一遍、再在存储里的最新文档上跑一遍，
+      // 所以计数每次都要从 0 开始，否则统计会翻倍。
+      stats.addedB = 0; stats.dupB = 0; stats.addedC = 0;
+
+      var have = {};
+      f.batches.forEach(function (b) { have[N.dedupKey(b)] = true; });
+      clean.batches.forEach(function (b) {
+        var k = N.dedupKey(b);
+        if (have[k]) { stats.dupB++; return; }
+        f.batches.push(b); have[k] = true; stats.addedB++;
+      });
+
+      var capKey = function (c) { return c.agentId + "|" + c.url + "|" + c.bodyHash; };
+      f.captures = f.captures || [];
+      var caps = {};
+      f.captures.forEach(function (c) { caps[capKey(c)] = true; });
+      clean.captures.forEach(function (c) {
+        if (caps[capKey(c)]) return;
+        caps[capKey(c)] = true;
+        f.captures.push(c); stats.addedC++;
+      });
+    }
+
+    commit(merge).then(function () {
+      render();
+      var parts = ["导入完成：批次 +" + stats.addedB];
+      if (stats.dupB) parts.push("已存在跳过 " + stats.dupB);
+      if (stats.addedC) parts.push("样本 +" + stats.addedC);
+      if (clean.droppedBatches || clean.droppedCaptures) {
+        parts.push("忽略损坏条目 " + (clean.droppedBatches + clean.droppedCaptures));
+      }
+      toast(parts.join("，") + "。点「立即同步」可让新样本参与计算。");
+    });
   }
 
   function render() {
     TODAY = N.startOfDay(new Date());   // 页面可能跨零点长开，"今天"必须每次渲染现算
     renderCards(); renderCal(); renderLegend(); renderUpcoming();
-    renderDetail(); renderFresh(); renderNotice();
+    renderDetail(); renderFresh(); renderNotice(); renderFoot();
     if (authOpen) renderAuth();
   }
 
@@ -888,27 +994,27 @@
 
   $("#cards").addEventListener("click", function (e) {
     var w = e.target.closest('[data-act="wasted"]');
-    if (w) { wasted = w.getAttribute("data-agent"); edit = null; sel = null; persist(); render(); return; }
+    if (w) { wasted = w.getAttribute("data-agent"); edit = null; adding = false; sel = null; persist(); render(); return; }
     var c = e.target.closest('[data-act="conflicts"]');
     if (c) {
       var first = doc.batches.filter(function (b) { return b.conflict && b.agent === c.getAttribute("data-agent"); })[0];
-      if (first) { edit = first.batchId; sel = null; wasted = null; persist(); render(); }
+      if (first) { edit = first.batchId; adding = false; sel = null; wasted = null; persist(); render(); }
     }
   });
 
   $("#grid").addEventListener("click", function (e) {
     var chip = e.target.closest("[data-bid]");
-    if (chip) { edit = chip.getAttribute("data-bid"); sel = null; wasted = null; delConfirm = null; persist(); render(); return; }
+    if (chip) { edit = chip.getAttribute("data-bid"); adding = false; sel = null; wasted = null; delConfirm = null; persist(); render(); return; }
     var cell = e.target.closest(".cell");
     if (!cell || cell.classList.contains("out")) return;
     var d = cell.getAttribute("data-day");
-    sel = (sel === d ? null : d); edit = null; wasted = null; delConfirm = null;
+    sel = (sel === d ? null : d); edit = null; adding = false; wasted = null; delConfirm = null;
     persist(); render();
   });
 
   $("#upcoming").addEventListener("click", function (e) {
     var r = e.target.closest("[data-bid]"); if (!r) return;
-    edit = r.getAttribute("data-bid"); sel = null; wasted = null; delConfirm = null;
+    edit = r.getAttribute("data-bid"); adding = false; sel = null; wasted = null; delConfirm = null;
     persist(); render();
   });
 
@@ -916,13 +1022,13 @@
     var t = e.target.closest("[data-act]");
     if (!t) {
       var r = e.target.closest("[data-bid]");
-      if (r) { edit = r.getAttribute("data-bid"); delConfirm = null; persist(); render(); }
+      if (r) { edit = r.getAttribute("data-bid"); adding = false; delConfirm = null; persist(); render(); }
       return;
     }
     var act = t.getAttribute("data-act");
 
-    if (act === "close") { edit = null; wasted = null; delConfirm = null; clearTimeout(confirmTimer); persist(); renderDetail(); return; }
-    if (act === "add") { edit = null; renderAdd(); return; }
+    if (act === "close") { edit = null; adding = false; wasted = null; delConfirm = null; clearTimeout(confirmTimer); persist(); renderDetail(); return; }
+    if (act === "add") { edit = null; adding = true; renderAdd(); return; }
 
     if (act === "accept") {
       var b0 = byId(edit); if (!b0) return;
@@ -989,6 +1095,7 @@
       });
       nb.manualEdited = true; nb.updatedAt = new Date().toISOString();
       if (byId(nb.batchId)) { toast("已存在同名同到期日的批次（dedupKey 命中）"); return; }
+      adding = false;
       sel = nb.expiresAt; edit = nb.batchId; wasted = null; delConfirm = null;
       commit(function (f) { f.batches.push(nb); });
       render(); toast("已加入日历");
@@ -1006,7 +1113,7 @@
   $("#today").onclick = function () {
     TODAY = N.startOfDay(new Date());
     view = [TODAY.getFullYear(), TODAY.getMonth()]; sel = N.ymd(TODAY);
-    edit = null; wasted = null; persist(); render();
+    edit = null; adding = false; wasted = null; persist(); render();
   };
   function shift(n) {
     var d = new Date(view[0], view[1] + n, 1);
@@ -1076,7 +1183,7 @@
   /* ---------- 授权面板 ---------- */
 
   $("#btnAuth").onclick = function () {
-    authOpen = true; authView = null; renderAuth();
+    authOpen = true; authView = null; adding = false; renderAuth();
     if (!IS_EXT) toast("预览模式：可以填地址，但授权与抓取需要装成扩展");
   };
   $("#closeAuth").onclick = function () { authOpen = false; authView = null; $("#mAuth").classList.remove("on"); render(); };

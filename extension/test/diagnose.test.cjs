@@ -133,6 +133,33 @@ var fbAuth = D.of({
 has("代发失败：说出真实原因", fbAuth, "代发也失败");
 has("代发失败：401 的措辞直达登录", fbAuth, "没有登录态");
 
+/* ---------- 诊断页标题的口径（v0.3.16） ---------- */
+/* v0.3.15 修掉了「代发成功、标题却写没读到」这一支，但 outcome:"error" 漏了：
+ * 标题标绿写「读到了页面响应」，正文写「刷新流程本身出错了」。这类"同一屏两句话
+ * 打架"是这个项目明令禁止的，所以标题口径也收进 diagnose.js，一起测。 */
+var vErr = D.verdict({ hookAt: "x", responses: 3, candidates: 1, outcome: "error", error: "开页失败" });
+eq("error 探针：标题不能说成读到了", vErr.ok, false);
+has("error 探针：标题点明是流程出错", vErr.text, "流程出错");
+eq("error 探针：标题与正文不打架",
+  /流程出错/.test(vErr.text) && !/读到了页面响应/.test(vErr.text), true);
+
+var vBoth = D.verdict({ outcome: "both-failed", responses: 2 });
+eq("两轮都没等到：标题是失败色", vBoth.ok, false);
+has("两轮都没等到：标题说清楚两轮都试过", vBoth.text, "都试过了");
+
+var vFb = D.verdict({ outcome: "both-failed", responses: 2, fallback: { ok: true, status: 200 } });
+eq("代发成功：标题算读到", vFb.ok, true);
+has("代发成功：标题说明是代发", vFb.text, "代发");
+
+var vOk = D.verdict({ hookAt: "x", responses: 5, candidates: 2, stored: 1 });
+eq("正常截到：标题算读到", vOk.ok, true);
+
+var vDirect = D.verdict({ mode: "direct", outcome: "direct", stored: 1 });
+eq("直读成功：标题算读到", vDirect.ok, true);
+var vDirectBad = D.verdict({ mode: "direct", outcome: "auth", httpStatus: 401 });
+eq("直读 401：标题是失败色", vDirectBad.ok, false);
+has("直读 401：标题不说读到", vDirectBad.text, "没读到");
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 if (fail) process.exitCode = 1;
 void N;

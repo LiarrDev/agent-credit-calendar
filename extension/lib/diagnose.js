@@ -121,6 +121,39 @@
   }
 
   /**
+   * 诊断页的**标题**口径：{ok, text}。
+   *
+   * 为什么也要收进这里：正文（of）说「刷新流程本身出错了」，标题却说「读到了页面
+   * 响应」并标绿，是同一屏两句话互相打架 —— 这正是 v0.3.15 花一整轮修掉的那类问题，
+   * 当时只补了 both-failed + 代发 那一支，outcome:"error" 漏了。
+   * 标题和正文现在都在这个文件里，改口径时不可能只改一半。
+   *
+   * ok 只表示「这一次刷新是否拿到了可用数据」，用于标题配色，不参与业务判断。
+   */
+  function verdict(p) {
+    var fbOk = !!(p && p.fallback && p.fallback.ok);
+
+    if (p && p.mode === "direct") {
+      var okd = p.outcome === "direct" || p.outcome === "direct-dup";
+      return {
+        ok: okd,
+        text: okd ? (p.outcome === "direct" ? "读到并入库" : "读到但余额没变") : "没读到数据"
+      };
+    }
+
+    // error = 流程本身崩了（注册脚本/开页失败），不是「平台没给数据」：
+    // 它跟「两轮都没等到」一样属于失败，不能被当成读到了。
+    var errored = !!(p && p.outcome === "error");
+    var bothFailed = !!(p && p.outcome === "both-failed");
+    return {
+      ok: (!errored && !bothFailed) || fbOk,
+      text: errored ? "流程出错（不是平台没给数据）"
+        : !bothFailed ? "读到了页面响应"
+        : (fbOk ? "页面没发请求，代发读到了" : "没读到（隐藏页和可见页都试过了）")
+    };
+  }
+
+  /**
    * 对外唯一入口：先按上面的口径判断点，再把「代发兜底」的结果接在后面。
    *
    * 为什么要接在后面而不是另起一句：钩子路径和代发路径是同一次刷新的两段，
@@ -153,5 +186,5 @@
     return text + "（另外：扩展代发也失败 —— " + (fb.message || "原因未记录") + "）";
   }
 
-  return { of: of };
+  return { of: of, verdict: verdict };
 });

@@ -201,16 +201,37 @@ function unregister(origin) {
   return chrome.scripting.unregisterContentScripts({ ids: ids }).catch(function () { return null; });
 }
 
-/** 退役 Qoder 的历史钩子。动态脚本跨浏览器重启保留，光改 UI 不会让它消失。 */
+/**
+ * 退役 Qoder 的历史钩子。动态脚本跨浏览器重启保留，光改 UI 不会让它消失。
+ *
+ * 这个函数在**每次 service worker 唤醒**时都会跑（顶层调用），所以它必须
+ * 「先读后判」：以前无条件 CreditStore.update() = 整份文档 load + 序列化 + set，
+ * 哪怕三个字段早就是目标值。那次写入会通过 chrome.storage.onChanged 唤醒扩展页，
+ * 而扩展页收到变更就重画 —— 用户正在填「补录批次」表单时（renderAdd 没有编辑标记），
+ * 另一个标签页加载一次 workbuddy.cn 的心跳就能把它连同已输入的内容冲掉。
+ * 现在已是目标状态就直接返回，不写、不惊动 UI。
+ *
+ * 注：load() 会过 migrate()，而 migrate 对 direct 平台已经强制这三项
+ * （fetchMode=direct / hookActive=false / origin=代码值），所以对今天的 Qoder 来说
+ * 判完必然是「已是目标状态」。update 那一支留作保险：万一以后 Qoder 不再是 direct
+ * 平台，这里仍然要把它压回去，而不是悄悄跳过。
+ */
+var QODER_ORIGIN = "https://qoder.com";
+
 function retireQoderHook() {
-  return unregister("https://qoder.com").then(function () {
-    return CreditStore.update(function (d) {
+  return unregister(QODER_ORIGIN).then(function () {
+    return CreditStore.load().then(function (d) {
       var a = d.agents && d.agents.qoder;
-      if (a) {
-        a.hookActive = false;
-        a.fetchMode = "direct";
-        a.origin = "https://qoder.com";
-      }
+      if (!a) return null;
+      if (!a.hookActive && a.fetchMode === "direct" && a.origin === QODER_ORIGIN) return null;
+      return CreditStore.update(function (doc) {
+        var q = doc.agents && doc.agents.qoder;
+        if (q) {
+          q.hookActive = false;
+          q.fetchMode = "direct";
+          q.origin = QODER_ORIGIN;
+        }
+      });
     });
   }).catch(function () { /* 存储还没初始化时忽略 */ });
 }

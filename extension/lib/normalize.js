@@ -434,6 +434,131 @@
     return b;
   }
 
+  /* ---------- 导入：导出的 JSON -> 可落库的数据 ----------
+   *
+   * 需求 §3.3 把「导出 / 导入」当成换机器与备份的唯一出路，但此前只做了导出，
+   * 「清空本机数据」之后没有任何恢复路径。导入必须过这一关，不能直接 Store.save：
+   * 导出的文件是用户能手改的，batches 一旦不是数组，renderCal 就会抛错、整页白屏，
+   * 而用户只会以为"导入没生效"。
+   *
+   * 规则：只保留白名单字段，认不出的条目直接丢（不猜、不修），并回报丢了多少条。
+   * 也顺手夹住极端值（负数余额、超长名称），免得一条脏数据把卡片撑变形。
+   * 平台配置（agents）不从文件恢复：授权是浏览器按域名给的，跨机器搬过来也用不了。
+   */
+  var IMPORT_MAX_CAPTURES = 60;
+
+  function importNum(v) {
+    var n = typeof v === "string" ? parseFloat(v.replace(/[,\s]/g, "")) : v;
+    return typeof n === "number" && isFinite(n) ? n : null;
+  }
+  function importIso(v) {
+    if (!v) return null;
+    var t = Date.parse(v);
+    return isFinite(t) ? new Date(t).toISOString() : null;
+  }
+
+  function importBatch(raw, known) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    var agent = typeof raw.agent === "string" ? raw.agent : "";
+    if (!agent || (known && known.indexOf(agent) < 0)) return null;
+    var label = String(raw.label == null ? "" : raw.label).trim();
+    if (!label) return null;
+    var exp = String(raw.expiresAt == null ? "" : raw.expiresAt).trim();
+    if (!parseYmd(exp)) return null;
+    var remaining = importNum(raw.remaining);
+    if (remaining === null) return null;
+    var granted = importNum(raw.granted);
+
+    var b = {
+      agent: agent,
+      label: label.slice(0, 60),
+      unit: raw.unit === "tokens" || raw.unit === "requests" ? raw.unit : "credits",
+      granted: granted === null ? Math.max(0, remaining) : Math.max(0, granted),
+      remaining: Math.max(0, remaining),
+      expiresAt: exp,
+      resetInstant: importIso(raw.resetInstant),
+      capturedAt: importIso(raw.capturedAt) || new Date().toISOString(),
+      source: raw.source === "manual" ? "manual" : "auto",
+      manualEdited: !!raw.manualEdited,
+      status: statusOf(exp),
+      absentCount: Math.max(0, importNum(raw.absentCount) || 0)
+    };
+    var upd = importIso(raw.updatedAt);
+    if (upd) b.updatedAt = upd;
+    // batchId 一律重算：文件里的值可能是手改的，撞车就会"改 A 影响 B"。
+    b.batchId = batchId(b.agent, dedupKey(b));
+    return b;
+  }
+
+  function importCapture(raw, known) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    var agentId = typeof raw.agentId === "string" ? raw.agentId : "";
+    if (!agentId || (known && known.indexOf(agentId) < 0)) return null;
+    var url = typeof raw.url === "string" ? raw.url.trim() : "";
+    if (!/^https?:\/\//i.test(url)) return null;
+    var body = typeof raw.bodyPreview === "string" ? raw.bodyPreview : "";
+    if (!body) return null;
+    var hash = typeof raw.bodyHash === "string" && raw.bodyHash ? raw.bodyHash : contentHash(body);
+    var len = importNum(raw.bodyLength);
+    return {
+      url: url,
+      method: typeof raw.method === "string" && /^[A-Z]+$/.test(raw.method) ? raw.method : "GET",
+      status: importNum(raw.status) || 0,
+      requestHeaderNames: Array.isArray(raw.requestHeaderNames)
+        ? raw.requestHeaderNames.filter(function (s) { return typeof s === "string"; }).slice(0, 40)
+        : [],
+      bodyPreview: body.slice(0, 200000),
+      bodyLength: len === null ? body.length : Math.max(0, len),
+      bodyHash: hash,
+      truncated: !!raw.truncated,
+      at: importIso(raw.at) || new Date().toISOString(),
+      agentId: agentId,
+      score: Math.max(0, importNum(raw.score) || 0),
+      reasons: Array.isArray(raw.reasons)
+        ? raw.reasons.filter(function (s) { return typeof s === "string"; }).slice(0, 8) : [],
+      via: typeof raw.via === "string" ? raw.via : "import"
+    };
+  }
+
+  /**
+   * @param raw   导出的 JSON（整份 doc，或 { captures } / { batches } 之一）
+   * @param opts  { agents: ["qoder", ...] } 认得的平台；不传则不校验（单测/预览）
+   * @returns { batches, captures, droppedBatches, droppedCaptures }
+   */
+  function importSnapshot(raw, opts) {
+    opts = opts || {};
+    var known = opts.agents || null;
+    var src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    var out = { batches: [], captures: [], droppedBatches: 0, droppedCaptures: 0 };
+    var seenKey = {}, seenCap = {};
+
+    var rawBatches = Array.isArray(src.batches) ? src.batches : [];
+    var rawCaptures = Array.isArray(src.captures) ? src.captures : [];
+
+    rawBatches.forEach(function (r) {
+      var b = importBatch(r, known);
+      if (!b) { out.droppedBatches++; return; }
+      var k = dedupKey(b);
+      if (seenKey[k]) { out.droppedBatches++; return; }   // 文件内部重复
+      seenKey[k] = true;
+      out.batches.push(b);
+    });
+
+    rawCaptures.forEach(function (r) {
+      var c = importCapture(r, known);
+      if (!c) { out.droppedCaptures++; return; }
+      var k = c.agentId + "|" + c.url + "|" + c.bodyHash;
+      if (seenCap[k]) { out.droppedCaptures++; return; }
+      seenCap[k] = true;
+      out.captures.push(c);
+    });
+
+    // 与 background 的 MAX_CAPTURES 对齐：多条低分样本不该挤掉真正的高分接口。
+    out.captures.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+    if (out.captures.length > IMPORT_MAX_CAPTURES) out.captures.length = IMPORT_MAX_CAPTURES;
+    return out;
+  }
+
   /* ---------- 隐私：捕获样本脱敏 ---------- */
 
   /** 只保留 header 的名字，绝不保留值；body 截断。捕获样本要给用户看、也可能被贴给我。 */
@@ -473,6 +598,7 @@
     dedupKey: dedupKey, batchId: batchId, normalizeBatch: normalizeBatch,
     stableTag: stableTag, daySuffix: daySuffix,
     mergeBatches: mergeBatches, applyManualEdit: applyManualEdit, acceptScraped: acceptScraped,
+    importSnapshot: importSnapshot,
     sanitizeCapture: sanitizeCapture, numOr: numOr, contentHash: contentHash
   };
 });
