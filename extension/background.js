@@ -717,7 +717,50 @@ var VISIBLE_WAIT_MS = 20000;
 /** 代发请求属于自己的回声窗口：这段时间内同一接口的钩子响应一律不计入探针。 */
 var SELF_ECHO_MS = 60000;
 
+/**
+ * 刷新互斥：同一平台同一时刻只允许一次刷新。
+ *
+ * 连点两次「刷新余额」的后果不是"两次都失败"，而是状态机被踩坏：
+ *   1. 第二次 beginProbe 覆盖第一次的探针 → 第一次 endProbe 删掉它 →
+ *      第二次 endProbe 拿到 null，诊断页变成「没有探针记录」；
+ *   2. ephemeral 路径下两次各自 register()，先结束的那次 unregister() 会把
+ *      另一次的钩子拆掉，而它自己却把 hookActive 写成 true。之后 syncAll 以为
+ *      钩子在、可以去抓活数据，实际每次都在没有钩子的页面上白等 32 秒。
+ * 第二个症状尤其糟：它不会报错，只会让自动同步静默失效。
+ *
+ * 语义与 authSyncing 一致（同平台互斥），这里单列一份是因为刷新的窗口更长、
+ * 且失败原因要原样回给 UI（第二次不该显示成"没读到数据"）。
+ *
+ * 锁带超时（REFRESH_LOCK_MS）：真卡住时（例如某个 chrome.* promise 永远不 settle）
+ * 必须能自己解开，否则这个平台从此再也点不动「刷新余额」，而用户看不出原因。
+ */
+var REFRESH_LOCK_MS = 120000;
+var refreshing = {};
+
 function refreshCaptures(agentId, opts) {
+  var cur = refreshing[agentId];
+  if (cur && Date.now() - cur.at < REFRESH_LOCK_MS) {
+    return Promise.resolve({
+      ok: false, busy: true, agentId: agentId,
+      error: "上一次刷新还没结束（最多 32 秒），等它出结果再点一次"
+    });
+  }
+  // token 认身份：万一上一轮在超时之后才真正收尾，它不能把这一轮的锁删掉。
+  var token = {};
+  refreshing[agentId] = { at: Date.now(), token: token };
+  function unlock() {
+    if (refreshing[agentId] && refreshing[agentId].token === token) delete refreshing[agentId];
+  }
+  return doRefresh(agentId, opts).then(function (r) {
+    unlock();
+    return r;
+  }, function (e) {
+    unlock();
+    throw e;
+  });
+}
+
+function doRefresh(agentId, opts) {
   opts = opts || {};
   return CreditStore.load().then(function (doc) {
     var a = doc.agents[agentId];

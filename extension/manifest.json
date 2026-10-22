@@ -31,7 +31,10 @@
         "capture-relay.js"
       ],
       "matches": [
-        "https://*/*"
+        "https://qoder.com/*",
+        "https://www.trae.cn/*",
+        "https://www.workbuddy.cn/*",
+        "https://lobsterai.youdao.com/*"
       ]
     }
   ],

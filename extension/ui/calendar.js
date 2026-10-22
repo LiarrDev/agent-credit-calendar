@@ -1277,9 +1277,14 @@
       var ephemeral = !isDirect && !doc.agents[id].hookActive;
       if (ephemeral) toast("该平台钩子已解除，这次只临时装一下：开页 → 截一次 → 立刻注销（隐藏页失败会自动改用可见页重试，可能抢一次焦点）");
       if (isDirect) toast("正在你的 Qoder 页面里刷新余额…");
+      // 刷新期间把按钮禁掉：后台有互斥，但用户看不出「为什么第二次没反应」，
+      // 而连点本身会踩坏探针和 hookActive（见 background 里 refreshing 的注释）。
+      busyReauth(id, true);
       chrome.runtime.sendMessage({ type: "REFRESH_CAPTURES", agentId: id, ephemeral: ephemeral }, function (r) {
+        busyReauth(id, false);
         if (chrome.runtime.lastError) { toast("后台没响应：" + chrome.runtime.lastError.message); return; }
         if (!r) { toast("后台没回话"); return; }
+        if (r.busy) { toast(r.error || "上一次刷新还没结束"); return; }
         if (r.ok) {
           if (r.fallback && r.fallback.ok) {
             // v0.3.14：页面自己一次额度接口都没发，扩展在页面上下文里代发成功。
@@ -1351,6 +1356,18 @@
     });
     renderAuth();   // change 已经在失焦之后触发，重画一次让按钮状态跟上
   });
+
+  /**
+   * 刷新期间置灰「刷新余额」。后台有互斥（repeated click 会被拒），但按钮不 disable
+   * 的话用户只会觉得"点了没反应"；而且连点正是踩坏探针/hookActive 的入口。
+   * 回调里必须先复原再处理结果：失败分支可能直接 return，不会走到重绘。
+   */
+  function busyReauth(id, on) {
+    $$('[data-act="reauth"][data-id="' + id + '"]').forEach(function (b) {
+      b.disabled = !!on;
+      b.textContent = on ? "刷新中…" : "刷新余额";
+    });
+  }
 
   function doAuthorize(id) {
     var inp = $('[data-url="' + id + '"]');

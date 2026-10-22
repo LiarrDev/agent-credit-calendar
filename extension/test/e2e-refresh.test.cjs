@@ -51,6 +51,9 @@ var BODY = JSON.stringify({
 /** 建一个带 mock chrome 的扩展环境，返回发消息与读存储的句柄。 */
 function createExt(dropOnChanged, fastWait) {
   var mem = {}, onChanged = [], msgListeners = [], tabSeq = 1000;
+  // 写存储的次数：service worker 每次唤醒都会整份 set() 一次的话，扩展页会被
+  // onChanged 叫醒重画，正在填的补录表单就没了（见 background 的 retireQoderHook）。
+  var writes = 0;
 
   function fire(key, doc) {
     if (dropOnChanged) return;
@@ -77,6 +80,7 @@ function createExt(dropOnChanged, fastWait) {
           return Promise.resolve(out);
         },
         set: function (o) {
+          writes++;
           Object.keys(o).forEach(function (k) {
             mem[k] = JSON.parse(JSON.stringify(o[k]));
             setTimeout(function () { fire(k, JSON.parse(JSON.stringify(o[k]))); }, 0);
@@ -159,7 +163,7 @@ function createExt(dropOnChanged, fastWait) {
     return handled;
   }
 
-  return { mem: mem, send: send, sender: sender, ctx: ctx };
+  return { mem: mem, send: send, sender: sender, ctx: ctx, writes: function () { return writes; } };
 }
 
 /** 走一次完整刷新，返回结果与耗时。 */
@@ -254,6 +258,12 @@ function runRefresh(dropOnChanged, fastWait) {
     console.log("--- 场景 5：完整响应会清掉同接口的旧截断样本");
     return pruneChecks();
   }).then(function () {
+    console.log("--- 场景 6：SW 唤醒时不该产生无谓的存储写入（v0.3.16）");
+    return startupWriteChecks();
+  }).then(function () {
+    console.log("--- 场景 7：同一平台的并发刷新要被互斥挡住（v0.3.16）");
+    return concurrentChecks();
+  }).then(function () {
     console.log("\n" + pass + " passed, " + fail + " failed");
     process.exit(fail ? 1 : 0);
   }, function (e) {
@@ -262,6 +272,74 @@ function runRefresh(dropOnChanged, fastWait) {
     process.exit(1);
   });
 })();
+
+/**
+ * 场景 6：service worker 每次唤醒都会跑一遍 retireQoderHook（顶层调用）。
+ * 它以前无条件 CreditStore.update() = 整份文档 load + 序列化 + set，于是任意一个
+ * 后台页心跳都会触发 onChanged → 扩展页 render()，把正在填的「补录批次」表单
+ * 连同已输入内容冲掉。这里断言：Qoder 已是目标状态时，启动不产生任何写入。
+ */
+function startupWriteChecks() {
+  var ext = createExt(false, true);
+  return new Promise(function (res) { setTimeout(res, 120); }).then(function () {
+    ok("启动：Qoder 已是目标状态时零写入", ext.writes() === 0, ext.writes());
+    return ext.ctx.CreditStore.load();
+  }).then(function (d) {
+    ok("启动：Qoder 仍是 direct 且无钩子",
+      d.agents.qoder.fetchMode === "direct" && d.agents.qoder.hookActive === false,
+      { fetchMode: d.agents.qoder.fetchMode, hook: d.agents.qoder.hookActive });
+  });
+}
+
+/**
+ * 场景 7：连点两次「刷新余额」。
+ *
+ * 以前第二次会覆盖第一次的探针，等两次各自收尾时探针已经被删掉，诊断变成
+ * 「没有探针记录」；ephemeral 路径下先结束的那次还会把另一次的钩子拆掉，
+ * 却把 hookActive 写成 true —— 之后自动同步一直在没有钩子的页面上白等 32 秒。
+ * 现在第二次直接被拒（busy），且不影响第一次。
+ */
+function concurrentChecks() {
+  var ext = createExt(false);
+  var second = null;
+
+  return new Promise(function (resolve) {
+    var settled = 0;
+    function done() { if (++settled === 2) resolve(); }
+
+    ext.send({ type: "REFRESH_CAPTURES", agentId: "workbuddy", ephemeral: false }, function (r) {
+      ok("并发：第一次仍然成功", !!(r && r.ok), r);
+      ok("并发：第一次的探针完整落库（没被第二次覆盖）",
+        !!(ext.mem[KEY].agents.workbuddy.probe && ext.mem[KEY].agents.workbuddy.probe.outcome),
+        ext.mem[KEY].agents.workbuddy.probe);
+      ok("并发：hookActive 保持 true",
+        ext.mem[KEY].agents.workbuddy.hookActive === true, ext.mem[KEY].agents.workbuddy.hookActive);
+      done();
+    });
+
+    // 第一次刚进等待窗口时插进来的第二次
+    ext.send({ type: "REFRESH_CAPTURES", agentId: "workbuddy", ephemeral: false }, function (r) {
+      second = r;
+      ok("并发：第二次被拒（不进入刷新流程）", !!(r && r.ok === false && r.busy === true), r);
+      ok("并发：第二次给的是人话原因", /还没结束/.test(String(r && r.error)), r && r.error);
+      ok("并发：第二次没有动内存里的探针", !!(ext.ctx.probeMem && ext.ctx.probeMem.workbuddy),
+        ext.ctx.probeMem && Object.keys(ext.ctx.probeMem));
+      done();
+    });
+
+    // 让第一次正常收尾（不然要等满 12 秒）
+    setTimeout(function () {
+      ext.send({
+        type: "CAPTURED",
+        entry: {
+          url: API, method: "GET", status: 200,
+          requestHeaderNames: ["content-type"], body: BODY, via: "fetch",
+          origin: "https://www.workbuddy.cn", pageUrl: PAGE
+        }
+      });
+    }, 300);
+  });
+}
 
 /**
  * 场景 4：我们代发的请求走的是页面的 window.fetch，也就是被 capture-main 包过的那一个，

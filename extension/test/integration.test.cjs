@@ -155,5 +155,27 @@ eq("手改过期日后，下次同步不会冒出重复批次", fifth.batches.le
 eq("抓到不同值时报冲突而非静默覆盖", fifth.batches[0].conflict, true);
 eq("冲突里保留抓取值", fifth.batches[0].scraped.remaining, 1840);
 
+/* ---------- 读路径钳制与字段保留（v0.3.16） ----------
+ * 上一轮只修了写入路径（下拉 onchange 里夹 1–365），读路径没管：v0.3.11 之前
+ * 写进去的 NaN 会一直躺在文档里，upcoming() 的 `d <= NaN` 恒为 false，
+ * 于是"未来 14 天无积分到期"永远显示，下拉选中态也空掉 —— 用户看不出异常。
+ * 「读进来的东西一定合法」必须是不变量，不能指望每条写入路径记得夹一次。 */
+eq("threshold: NaN 被夹回默认 14", S.migrate({ settings: { threshold: NaN } }).settings.threshold, 14);
+eq("threshold: 字符串数字照常接受", S.migrate({ settings: { threshold: "30" } }).settings.threshold, 30);
+eq("threshold: 0 被抬到 1", S.migrate({ settings: { threshold: 0 } }).settings.threshold, 1);
+eq("threshold: 9999 被压到 365", S.migrate({ settings: { threshold: 9999 } }).settings.threshold, 365);
+eq("threshold: 小数取整", S.migrate({ settings: { threshold: 7.6 } }).settings.threshold, 8);
+eq("staleDays: 坏值退回 7", S.migrate({ settings: { staleDays: "很久" } }).settings.staleDays, 7);
+eq("lazySyncDays: 坏值退回 3", S.migrate({ settings: { lazySyncDays: null } }).settings.lazySyncDays, 3);
+
+/* Qoder 的 endpoint 是运行时事实（直读真正读到的接口），不该每次 load 被抹掉：
+ * 抹成 null 就成了只写不读的字段，诊断页对它永远显示「未记录」。 */
+eq("Qoder 已是直读时保留 endpoint",
+  S.migrate({ agents: { qoder: { fetchMode: "direct", endpoint: "https://qoder.com/api/usage" } } })
+    .agents.qoder.endpoint, "https://qoder.com/api/usage");
+eq("Qoder 从钩子迁来时清掉旧 endpoint（记的是已废掉的路径）",
+  S.migrate({ agents: { qoder: { fetchMode: "capture", endpoint: "https://qoder.com/old" } } })
+    .agents.qoder.endpoint, null);
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

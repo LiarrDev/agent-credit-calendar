@@ -42,9 +42,26 @@
     };
   }
 
+  /** 读进来的数字一律夹到合法区间：坏值不该靠每条写入路径各自记得夹一次。 */
+  function clampInt(v, min, max, dflt) {
+    var n = typeof v === "number" ? v : parseInt(v, 10);
+    if (!isFinite(n)) return dflt;
+    n = Math.round(n);
+    return Math.min(max, Math.max(min, n));
+  }
+
   function migrate(doc) {
     var d = Object.assign(defaults(), doc || {});
-    d.settings = Object.assign(defaults().settings, (doc && doc.settings) || {});
+    var st = Object.assign(defaults().settings, (doc && doc.settings) || {});
+    /* 读路径也必须钳制，而不是只在 onchange 里夹。
+     * 反例：v0.3.11 之前写进去的 threshold: NaN 会一直躺在文档里，
+     * upcoming() 的 `d <= NaN` 恒为 false →「未来 14 天无积分到期」永远显示，
+     * 而 #thr 下拉的 value 是 "NaN"、选中态直接空掉。用户看不出任何异常，
+     * 只会以为"最近确实没有要过期的"。 */
+    st.threshold = clampInt(st.threshold, 1, 365, 14);
+    st.staleDays = clampInt(st.staleDays, 1, 60, 7);
+    st.lazySyncDays = clampInt(st.lazySyncDays, 0, 90, 3);
+    d.settings = st;
     d.ui = Object.assign({ view: null, sel: null, edit: null, wasted: null }, (doc && doc.ui) || {});
     // agent 配置以代码里的 AGENTS 为准，存储里只留用户可改的字段
     var base = defaults().agents;
@@ -60,7 +77,11 @@
         consoleUrl: isDirect ? base[id].consoleUrl : (saved.consoleUrl || base[id].consoleUrl),
         fetchMode: isDirect ? "direct" : (saved.fetchMode || base[id].fetchMode),
         origin: isDirect ? base[id].origin : (saved.origin || null),
-        endpoint: isDirect ? null : (saved.endpoint || null),
+        // endpoint 是**运行时事实**（这一家真正读到的接口），不该每次 load 被抹掉：
+        // 直读流水线和 syncOne 都会写它，抹成 null 就成了只写不读的字段，诊断页对
+        // Qoder 永远显示「未记录」。唯一例外是 Qoder 从钩子迁到直读的那一次——
+        // 那时的 endpoint 记的是已经废掉的钩子路径，留着会把排查引到错地方。
+        endpoint: isDirect && saved.fetchMode !== "direct" ? null : (saved.endpoint || null),
         lastSyncAt: saved.lastSyncAt || null,
         // 旧版钩子失败留下的红字对直读没有意义，Qoder 升级到 direct 的那一次清掉；
         // 已经是 direct 的文档要保留真实错误，其余平台更不能每次加载都被抹掉。
