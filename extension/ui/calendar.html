@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 积分过期日历</title>
+<link rel="stylesheet" href="calendar.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Agent 积分过期日历</h1>
+      <div class="sub" id="modeTag">加载中…</div>
+    </div>
+    <div class="hdr-right">
+      <div class="fresh" id="fresh"></div>
+      <button id="btnAuth">授权与样本</button>
+      <button id="sync" class="primary">立即同步</button>
+    </div>
+  </header>
+
+  <div id="notice"></div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="main">
+    <div class="panel">
+      <div class="cal-head">
+        <div class="mo" id="moTitle"></div>
+        <div class="nav">
+          <button class="mini" id="prev">←</button>
+          <button class="mini" id="today">回到今天</button>
+          <button class="mini" id="next">→</button>
+        </div>
+      </div>
+      <div class="dow"><i style="color:#a9b2c2">日</i><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i style="color:#a9b2c2">六</i></div>
+      <div class="grid" id="grid"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="rail">
+      <div class="panel">
+        <div class="sec-h">
+          <h3>即将到期</h3>
+          <span class="thr">阈值 <select id="thr"><option value="7">7 天</option><option value="14" selected>14 天</option><option value="30">30 天</option></select></span>
+        </div>
+        <div class="sec-b" id="upcoming"></div>
+      </div>
+
+      <div class="panel" id="detail"></div>
+    </div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<!-- 授权与样本 -->
+<div class="modal" id="mAuth">
+  <div class="box">
+    <h2>授权与捕获样本</h2>
+    <div class="body" id="authBody"></div>
+    <div class="foot">
+      <button id="expCap" title="导出内容含平台响应体，可能带账号标识；分享前请先脱敏">导出捕获样本</button>
+      <button id="expDoc" title="导出内容包含捕获样本，可能带账号标识；不要上传到公开仓库">导出全部数据</button>
+      <button class="primary" id="closeAuth">完成</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../lib/agents.js"></script>
+<script src="../lib/normalize.js"></script>
+<script src="../lib/diagnose.js"></script>
+<script src="../lib/store.js"></script>
+<script src="calendar.js"></script>
+</body>
+</html>

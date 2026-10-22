@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Agent 积分过期日历",
+  "version": "0.3.15",
+  "description": "在月历上查看各 AI Agent 积分的到期日与当前余额（Qoder / TRAE / WorkBuddy / LobsterAI）。Qoder 页面内直读，其余三家授权截获；全程只读。",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://qoder.com/*",
+    "https://www.trae.cn/*",
+    "https://www.workbuddy.cn/*",
+    "https://lobsterai.youdao.com/*"
+  ],
+  "optional_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "打开积分日历"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "capture-main.js",
+        "capture-relay.js"
+      ],
+      "matches": [
+        "https://*/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

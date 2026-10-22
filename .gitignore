@@ -1,0 +1,31 @@
+# macOS / 编辑器
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# 依赖与测试产物
+node_modules/
+coverage/
+test-output/
+*.log
+.opera-profile/
+
+# 凭据与环境（本项目不应出现，保险起见）
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa*
+
+# 扩展打包产物
+*.crx
+*.zip
+
+# 用户导出的捕获样本 / 全部数据：可能含平台返回的账号标识，禁止入库
+credit-captures-*.json
+credit-calendar-*.json
