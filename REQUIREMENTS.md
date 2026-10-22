@@ -1,11 +1,12 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v0.3.15**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
+> 状态：`extension/` **v0.3.16**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
 > v0.3.12–13 把「目标接口到底回了什么 / 到底有没有被请求」记进探针，诊断不再瞎猜。
 > v0.3.14 修 WorkBuddy「刷新余额」永远失败：页面自己不发额度请求时，改在同一个页面上下文里代发一次只读请求（决策 24）。
+> v0.3.16 补上导入、清空改两段式确认，并修掉「后台每次唤醒都重写存储冲掉补录表单」「诊断页标题与结论打架」等边界问题（决策 26）。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
@@ -158,6 +159,9 @@ LobsterAI / TRAE 走跨域截获，WorkBuddy 走同源截获。WorkBuddy 的接�
 ### 3.3 存储与导出
 
 `chrome.storage.local` 存 `batches`、`agentConfig` 和候选 `captures`，是唯一事实来源。另提供 JSON 导出/导入（迁移、备份）和 `.ics` 导出（每个批次一个全天事件，提前一天提醒），用 `chrome.downloads` 落盘。`.ics` 建议做进 M3，不挡主线。
+**导出与导入都已实现（导入从 v0.3.16 起）**：导入走 `N.importSnapshot` 白名单清洗，按 `dedupKey`
+补缺合并（同键以现有数据为准），不恢复 `agents` 配置；「清空本机数据」是两段式确认，
+清空前建议先「导出全部数据」。
 
 `.ics` 到底是什么：iCalendar 是系统日历（日历 App / Outlook / Google Calendar）通用的一种文本格式，
 每个批次导成一条"全天事件"，标题写「Qoder 10月包 4800 积分到期」，并带一个提前一天的提醒。
@@ -466,6 +470,51 @@ free-packages 响应有 **约 130KB**，而 `sanitizeCapture` 的默认上限仍
       本身就会让人以为被截断）。
     回归：`diagnose` +6 条（代发成功的三种终态 + 老探针兼容）、`e2e-refresh` +2 个场景
     （回声不入账、完整响应清理旧截断样本）与场景 3 的 3 条计数断言，共 **397 条**。
+
+26. **（v0.3.16）不可恢复的操作必须两段式确认，承诺了导入就要有导入；后台不要无缘无故写存储。**
+    这一版没有新功能（导入除外），全部是第二轮 code review（`CODE_REVIEW_v0.3.15.md`）里
+    「会直接影响信任」的几条：
+    - **补录表单会被后台写入冲掉**：`retireQoderHook` 在 `background.js` 顶层、每次 SW 唤醒
+      都跑，且无条件 `CreditStore.update()`（整份 load + set）。扩展页收到 `onChanged` 就
+      `render()`，而 `renderAdd` 不设任何编辑标记 → 另一个标签页加载一次 workbuddy.cn
+      （`RELAY_READY` 唤醒 SW）就足以让正在填的表单连同内容消失，无提示。
+      修法：退役逻辑**先读后判**（已是目标状态就不写），补录表单加独立的 `adding` 守卫
+      （语义与 `edit` 并列），`renderDetail()` 在 `adding` 时不动 `#detail`。
+    - **诊断页自相矛盾**：`outcome:"error"`（流程本身崩了）被 `ok = p.outcome !== "both-failed"`
+      判成成功 → 绿色标题「读到了页面响应」＋正文「刷新流程本身出错了」。标题口径收进
+      `lib/diagnose.js` 的 `verdict(p) -> {ok, text}`，与正文同一份实现，UI 不再自己算。
+    - **清空无确认、也没有导入**：需求 §3.3 把「导出/导入」当备份的唯一出路，导出做了、
+      导入从来没做，于是「清空本机数据」之后无路可退。现在页脚有「导入备份（JSON）」，
+      落库前过 `N.importSnapshot` 白名单清洗（只留白名单字段、认不出的条目丢掉并回报条数），
+      再按 `dedupKey` 补缺合并（同键以现有数据为准，不覆盖）；清空复用行内两段式确认（5 秒窗口）。
+      导入不恢复 `agents` 配置：授权是浏览器按域名给的，跨机器搬过来也用不了。
+      另外发现 `renderFoot()` 此前**没有任何调用方** —— 页脚（含清空入口）其实一直没渲染过，
+      这轮把它接进 `render()`，所以清空确认与导入是一起上线的。
+    - **同一平台并发刷新踩坏状态机**：第二次 `beginProbe` 覆盖第一次的探针，两次 `endProbe`
+      互相删记录；`ephemeral` 路径下先结束的那次 `unregister()` 拆掉另一次的钩子，却把
+      `hookActive` 写成 `true`，之后 `syncAll` 每次都在没有钩子的页面上白等 32 秒。
+      修法：`refreshing[agentId]` 互斥，第二次直接回 `{ok:false, busy:true}`；UI 侧刷新期间
+      disable 按钮（失败分支也要复原，否则按钮永远停在「刷新中…」）。
+    - **读路径也要钳制**：`threshold: NaN` 会一路活到渲染，`d <= NaN` 恒 false →
+      「未来 14 天无积分到期」永久空白、下拉选中态也空掉，用户看不出异常。`migrate()` 现在
+      统一夹 `threshold` / `staleDays` / `lazySyncDays`，让「读进来的东西一定合法」成为不变量。
+    - **Qoder 的 `endpoint` 不再每次 load 被抹掉**：直读流水线与 `syncOne` 都写它，`migrate`
+      却强制 `null`，成了只写字段、诊断页永远显示「未记录」。现在保留；只有「从钩子迁到直读」
+      那一次清掉（记的是已废掉的路径）。
+    - **`web_accessible_resources.matches` 从 `https://*/*` 收敛到四个已知 origin**：
+      上一轮不敢动的是 `use_dynamic_url`（怕影响 MAIN world 注入），收敛 `matches` 不碰注入路径。
+    - 其余 P3：`MAX_CAPTURES` 淘汰不再可能淘汰刚入库的那条（探针 `stored+1` 与库不一致）、
+      `applyManualEdit` 校验并 trim 名称（空名会让 `dedupKey` 变成 `qoder||2026-11-01`）、
+      同名冻结批次改成队列匹配（原来只留最后一个，另一笔 `absentCount` 无上限增长）、
+      `batchId` 后缀定长 8 位 hex、样本列表同分时按 `at` 降序（与 `pickCapture` 对齐）、
+      分块传输按 content-type 挡掉二进制响应。
+    回归：`diagnose` +8（标题口径）、`normalize` +20（编辑校验/同名队列/batchId 长度/导入清洗）、
+    `integration` +9（读路径钳制与 endpoint 保留）、`e2e-refresh` +8（启动零写入、并发互斥）、
+    新增 `ui.test.cjs` +19（用 DOM 桩钉住页脚渲染、清空两段式确认、导入合并与坏文件不清空文档），
+    共 **464 条**。
+    没做：`waitForCapture` 的 2 秒兜底仍会全量 `load()`（建议改成只轮询轻量 `capture-seq` key）。
+    它是 v0.3.11 为可靠性加回来的路径，动它要先证明「事件不可靠时兜底仍生效」，收益（每 2 秒一次
+    反序列化）小于风险，留作后续。
 
 ## 8. 需要你提供 / 待确认
 

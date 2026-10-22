@@ -1,9 +1,26 @@
-# Agent 积分过期日历 — 扩展（v0.3.15）
+# Agent 积分过期日历 — 扩展（v0.3.16）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v0.3.15，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v0.3.16，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v0.3.16 是**只修边界、不加功能**的版本（补上导入除外）：
+
+- **补录表单不再被后台写入冲掉**：service worker 每次唤醒都会跑一次 `retireQoderHook`，
+  而它无条件整份 `set()` 存储，扩展页收到 `onChanged` 就重画——正在填的补录表单连同
+  已输入内容一起消失，且没有任何提示。现在退役逻辑先读后判（已是目标状态就不写），
+  UI 的补录表单也有了独立于 `edit` 的 `adding` 守卫。
+- **诊断页不再自相矛盾**：`outcome:"error"`（流程本身崩了）以前仍被标绿写成
+  「读到了页面响应」。标题口径收进 `lib/diagnose.js` 的 `verdict()`，与正文同一份。
+- **补上导入 + 清空改两段式确认**：需求 §3.3 承诺的 JSON 导入一直没做，所以
+  「清空本机数据」之后其实无路可退。现在页脚有「导入备份（JSON）」，落库前过
+  `importSnapshot` 白名单清洗（坏文件不会把 doc 结构打烂），清空则复用行内两段式确认。
+- **同一平台的并发刷新加互斥**：连点两次会覆盖探针、`ephemeral` 路径还会把另一轮
+  的钩子拆掉却把 `hookActive` 写成 `true`，之后自动同步静默失效。
+- 读路径钳制 `threshold` / `staleDays`（坏的 `NaN` 会让「即将到期」永久空白），
+  Qoder 的 `endpoint` 不再每次 `load()` 被抹成 `null`；
+  `web_accessible_resources.matches` 从全 `https://*` 收敛到四个已知域名。
 
 v0.3.15 修「刷新余额」面板自己骗自己：代发兜底那条链路里，真正入库的那次
 `storeCapture` 没带探针（计数丢失），而代发请求又被自己的钩子截了一遍记成「重复」，
@@ -90,9 +107,10 @@ adapters/lobsterai.js  LobsterAI 的 creditItems 映射（照 2026-10-22 真实�
 adapters/trae.js       TRAE 的额度包映射（照 2026-10-22 真实响应写的，有单测）
 adapters/workbuddy.js  WorkBuddy 的免费/赠送包映射 + 代发兜底配方（照真实响应与站点 bundle 写的，有单测）
 ui/calendar.html|css|js  日历界面
-test/*.test.cjs        node 单测，共 345 条断言（含 capture-main 的 XHR 回归、中继的
-                       信任边界回归、探针诊断回归、130KB 截断样本升级回归，以及
-                       e2e-refresh 在 mock chrome 里跑通的整条刷新链路）
+test/*.test.cjs        node 单测，共 464 条断言（含 capture-main 的 XHR 回归、中继的
+                       信任边界回归、探针诊断回归、130KB 截断样本升级回归、导入清洗回归，
+                       以及 e2e-refresh 在 mock chrome 里跑通的整条刷新链路、
+                       ui.test 用 DOM 桩钉住的页脚/清空确认/导入接线）
 test/run-all.cjs       串起全部单测并汇总（npm test 用的就是它）
 ```
 

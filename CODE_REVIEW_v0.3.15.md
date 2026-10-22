@@ -3,6 +3,13 @@
 > 评审时间：2026-10-22 · 范围：`extension/` 全量（12 个源文件 3.4k 行 + 12 个测试文件 3.1k 行）
 > 基线：`cd extension && npm test` → **397 passed, 0 failed**
 > 上一轮（v0.3.9）的 `CODE_REVIEW.md` 已归档在项目根，本轮只记新发现，以及上一轮结论的复核。
+>
+> **处置状态（v0.3.16 已落地）**：P1 #1 #2 #3、P2 #4 #5 #6 #7，以及 P3 #8 #9 #10 #11 #12 #14 #16 均已修复
+> （#15 保留但已在注释里标明"暂无入口"）；仅 #13（`waitForCapture` 的 2 秒兜底仍全量 `load()`）未做，
+> 理由见 `REQUIREMENTS.md` 决策 26。新增回归 67 条，`npm test` → **464 passed, 0 failed**。
+> 修复过程中另发现一处评审没提的问题：`renderFoot()` 没有任何调用方，页脚（含唯一的清空入口）
+> 其实一直没渲染过；已接入 `render()`，并由新增的 `test/ui.test.cjs` 钉住。
+> 落地细节见 `REQUIREMENTS.md` 决策 26 与 `extension/README.md` 的 v0.3.16 段。
 
 ## 0. 上一轮 17 条的复核
 

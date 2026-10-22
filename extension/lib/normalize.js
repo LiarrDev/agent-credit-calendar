@@ -186,10 +186,18 @@
     return [b.agent, normLabel(b.label)].join("|");
   }
 
-  function hash6(str) {
+  /**
+   * 32 位哈希 -> 定长 8 位 hex。
+   *
+   * 以前是 "取前 8 位" 但拼零逻辑写错了，实际长度在 6/7/8 之间浮动（3000 次实测
+   * 6 位 9 次、7 位 184 次、8 位 2807 次）。batchId 是导出文件里的字段、也是 UI
+   * meta 里给人看的东西，长度不定会让"同一个格式"这句话不成立，也更容易和真实
+   * 名字混淆。一位不多、一位不少。
+   */
+  function hash8(str) {
     var h = 0;
     for (var i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-    return (h >>> 0).toString(16) + "000000".slice(0, 6 - Math.min(6, (h >>> 0).toString(16).length));
+    return ("00000000" + (h >>> 0).toString(16)).slice(-8);
   }
 
   /**
@@ -215,7 +223,7 @@
     return s.length + "-" + (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
   }
 
-  function batchId(agent, key) { return agent + "-" + hash6(key).slice(0, 8); }
+  function batchId(agent, key) { return agent + "-" + hash8(key); }
 
   /**
    * 稳定短码：同一个 seed 每次同步都得到同一个值（8 位 hex）。
@@ -323,17 +331,41 @@
     // 手改过的批次额外按 (agent + label) 建索引。用户手改的经常就是过期日，
     // 一改 dedupKey 就变了，下次同步会把它当新批次再加一遍，页面上出现两笔同名、
     // 到期日不同的钱——所以先用全键找，找不到再按名字找冻结批次。
+    //
+    // 同名可能有多笔（WorkBuddy 的裂变包一天十几笔同名），所以这里存的是队列：
+    // 以前只留最后一个，另一笔永远匹配不上，absentCount 会无上限增长，UI 上一直
+    // 显示"最近 N 次同步没返回这笔"，看着像抓取坏了，其实是匹配坏了。
     var frozenByName = {};
     for (i = 0; i < out.length; i++) {
-      if (out[i].manualEdited) frozenByName[frozenKey(out[i])] = out[i];
+      if (out[i].manualEdited) {
+        var fk0 = frozenKey(out[i]);
+        (frozenByName[fk0] || (frozenByName[fk0] = [])).push(out[i]);
+      }
+    }
+
+    /** 从同名队列里领一笔，并把它标记为已用（同一个对象不会被两笔 incoming 领走） */
+    function takeFrozen(n) {
+      var arr = frozenByName[frozenKey(n)];
+      if (!arr || !arr.length) return null;
+      return arr.shift();
+    }
+    /** byKey 命中时，同一个对象如果还在某个同名队列里，也要移出去 */
+    function dropFrozen(obj) {
+      var arr = frozenByName[frozenKey(obj)];
+      if (!arr) return;
+      var idx = arr.indexOf(obj);
+      if (idx >= 0) arr.splice(idx, 1);
     }
 
     for (i = 0; i < incoming.length; i++) {
       var n = incoming[i];
       var k = dedupKey(n);
       seen[k] = true;
-      var cur = byKey[k] || frozenByName[frozenKey(n)];
-      if (cur) seen[dedupKey(cur)] = true;
+      var cur = byKey[k] || takeFrozen(n);
+      if (cur) {
+        seen[dedupKey(cur)] = true;
+        dropFrozen(cur);
+      }
 
       if (!cur) {
         var created = Object.assign({}, n);
@@ -407,9 +439,22 @@
     return { batches: out, added: added, updated: updated, conflicts: conflicts, unchanged: unchanged };
   }
 
-  /** 用户手动改过之后调用：冻结该批次并清掉冲突标记 */
+  /**
+   * 用户手动改过之后调用：冻结该批次并清掉冲突标记。
+   *
+   * 返回 null 表示这次修改不合法（名称改成了空白），调用方应保留原批次并提示。
+   * 为什么必须在这里挡：dedupKey 里含 label，名称被改成空白后键会变成
+   * `qoder||2026-11-01`，两笔"空名"批次互相覆盖，而在 UI 上只是一片空白，
+   * 看不出异常。补录路径早就有这条校验，编辑路径原来漏了。
+   */
   function applyManualEdit(batch, patch) {
+    patch = Object.assign({}, patch || {});
+    if (patch.label !== undefined) {
+      patch.label = String(patch.label == null ? "" : patch.label).trim();
+      if (!patch.label) return null;
+    }
     var b = Object.assign({}, batch, patch);
+    if (!b.label || !String(b.label).trim()) return null;
     b.manualEdited = true;
     b.updatedAt = new Date().toISOString();
     if (b.source === "auto") b.source = "manual";

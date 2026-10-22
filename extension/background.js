@@ -257,6 +257,11 @@ function pruneShadowedTruncated() {
 function registerAndOpen(agentId, origin, url) {
   // 直读平台不注册任何脚本：这里的「打开」只是把后台页开给用户登录/确认，
   // 真正的读取在「刷新余额」时由 executeScript 一次性完成。
+  //
+  // 注意：这个分支目前**没有入口** —— 直读平台的卡片只渲染「刷新余额 / 看样本」，
+  // 不会发 REGISTER_AND_OPEN。保留它是因为哪天直读平台需要「打开后台页登录」时，
+  // 这是唯一一处把 origin/consoleUrl/fetchMode 一起写对的地方；删掉后重写要重新
+  // 面对权限与注销顺序的细节。改这里之前先确认入口真的存在，别以为它在跑。
   var adapter = CreditAdapters.get(agentId);
   if (adapter && adapter.direct) {
     var cfg = adapter.direct;
@@ -499,10 +504,14 @@ function storeCapture(agentId, entry, p) {
       while (list.length > MAX_CAPTURES) {
         // 超上限时丢「最没用」的那个：各平台先保护自己 adapter 指定的接口，
         // 再比分数。否则一个页面顺带发的十几个高分响应会把真正的接口样本挤出去。
-        var worst = 0;
-        for (var j = 1; j < list.length; j++) {
-          if (captureRank(list[j]) < captureRank(list[worst])) worst = j;
+        // 但刚入库的这一条不参与淘汰：它是本次刷新的成果，探针也已经把它记成
+        // stored+1，当场淘汰就变成「探针说存了 1 条、库里没有」。
+        var worst = -1;
+        for (var j = 0; j < list.length; j++) {
+          if (list[j] === clean) continue;
+          if (worst < 0 || captureRank(list[j]) < captureRank(list[worst])) worst = j;
         }
+        if (worst < 0) break;   // 库里只有这一条，无从淘汰（防御性，正常不会走到）
         list.splice(worst, 1);
       }
     }

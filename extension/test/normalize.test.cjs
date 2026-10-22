@@ -206,5 +206,84 @@ var frozenFuture = N.mergeBatches(
   { now: new Date(2026, 9, 22) });
 eq("未过期的冻结批次 status 回到 active", frozenFuture.batches[0].status, "active");
 
+/* ---------- 编辑路径的校验（v0.3.16） ----------
+ * 名称被改成空白后 dedupKey 会变成 `qoder||2026-11-01`，两笔"空名"批次互相覆盖，
+ * 而 UI 上只是一片空白，看不出异常。补录路径早就有这条校验，编辑路径原来漏了。 */
+var editBase = N.normalizeBatch({ agent: "qoder", label: "包A", granted: 100, remaining: 50, expiry: "2026-11-01" });
+eq("把名称改成空白：拒绝保存", N.applyManualEdit(editBase, { label: "   " }), null);
+eq("把名称改成空串：拒绝保存", N.applyManualEdit(editBase, { label: "" }), null);
+eq("名称两边的空格被 trim",
+  N.applyManualEdit(editBase, { label: "  包B  " }).label, "包B");
+eq("不传 label 时仍能正常冻结",
+  N.applyManualEdit(editBase, { remaining: 20 }).manualEdited, true);
+
+/* ---------- 同名多笔冻结批次（v0.3.16） ----------
+ * 以前 frozenByName 同名只留最后一个，另一笔永远匹配不上，absentCount 无上限增长，
+ * UI 上一直显示"最近 N 次同步没返回这笔"，看着像抓取坏了。 */
+var sameNameBase = { agent: "qoder", label: "同名包", unit: "credits", granted: 100, remaining: 100 };
+var f1 = Object.assign({}, sameNameBase, { batchId: "a", manualEdited: true, expiresAt: "2026-11-05", absentCount: 0 });
+var f2 = Object.assign({}, sameNameBase, { batchId: "b", manualEdited: true, expiresAt: "2026-11-06", absentCount: 0 });
+var twoIncoming = [
+  N.normalizeBatch({ agent: "qoder", label: "同名包", granted: 100, remaining: 30, expiry: "2026-11-01" }),
+  N.normalizeBatch({ agent: "qoder", label: "同名包", granted: 100, remaining: 40, expiry: "2026-11-02" })
+];
+var twoRes = N.mergeBatches([f1, f2], twoIncoming, { now: new Date(2026, 9, 22) });
+eq("两笔同名冻结批次各被匹配一次（absentCount 都归零）",
+  twoRes.batches.map(function (b) { return b.absentCount; }), [0, 0]);
+eq("同名冻结批次不新增第三条", twoRes.batches.length, 2);
+eq("两笔都报冲突（抓取值不同）", twoRes.conflicts, 2);
+
+/* ---------- batchId 定长 ---------- */
+var idLens = {};
+for (var bi = 0; bi < 500; bi++) {
+  var bid = N.batchId("qoder", "label-" + bi + "|2026-11-01");
+  var suf = bid.slice("qoder-".length);
+  idLens[suf.length] = true;
+}
+eq("batchId 后缀长度固定 8 位", Object.keys(idLens).map(Number), [8]);
+eq("batchId 后缀是 hex", /^[0-9a-f]{8}$/.test(N.batchId("qoder", "x").slice(6)), true);
+
+/* ---------- 导入备份（v0.3.16） ----------
+ * 需求 §3.3 承诺的恢复路径。文件是用户能手改的，必须先清洗再落库：
+ * 一个坏字段就能让 doc 结构打烂、整页白屏，而用户只会以为"导入没生效"。 */
+var imported = N.importSnapshot({
+  schema: 1,
+  batches: [
+    { agent: "qoder", label: "  恢复包  ", granted: 100, remaining: 40, expiresAt: "2026-11-30" },
+    { agent: "qoder", label: "恢复包", granted: 100, remaining: 40, expiresAt: "2026-11-30" },  // 文件内重复
+    { agent: "不存在的平台", label: "x", remaining: 1, expiresAt: "2026-11-30" },
+    { agent: "qoder", label: "", remaining: 1, expiresAt: "2026-11-30" },
+    { agent: "qoder", label: "日期坏了", remaining: 1, expiresAt: "2026/11/30" },
+    { agent: "qoder", label: "余额不是数字", remaining: "很多", expiresAt: "2026-11-30" },
+    null
+  ],
+  captures: [
+    { agentId: "qoder", url: "https://qoder.com/api/usage", bodyPreview: '{"a":1}', score: 5,
+      requestHeaderNames: ["content-type"], at: "2026-10-20T10:00:00.000Z" },
+    { agentId: "qoder", url: "javascript:alert(1)", bodyPreview: "x" },
+    { agentId: "qoder", url: "https://qoder.com/api/usage", bodyPreview: '{"a":1}', score: 5 }
+  ]
+}, { agents: ["qoder", "trae", "workbuddy", "lobsterai"] });
+
+eq("导入：只留下 1 笔合法批次", imported.batches.length, 1);
+eq("导入：名称被 trim", imported.batches[0].label, "恢复包");
+eq("导入：丢弃的条目数如实回报（1 重复 + 1 未知平台 + 1 空名 + 1 坏日期 + 1 非数字 + 1 null）",
+  imported.droppedBatches, 6);
+eq("导入：batchId 一律按内容重算", imported.batches[0].batchId, N.batchId("qoder", N.dedupKey(imported.batches[0])));
+eq("导入：只留下 1 条合法样本", imported.captures.length, 1);
+eq("导入：非 http(s) 的接口地址被丢掉", imported.droppedCaptures, 2);
+eq("导入：样本补上 agentId/score", [imported.captures[0].agentId, imported.captures[0].score], ["qoder", 5]);
+
+var emptyImport = N.importSnapshot(null, { agents: ["qoder"] });
+eq("导入：null 不抛异常，返回空结果", [emptyImport.batches.length, emptyImport.captures.length], [0, 0]);
+var noBatches = N.importSnapshot({ batches: "不是数组" }, { agents: ["qoder"] });
+eq("导入：batches 不是数组时当作空（结构不被污染）", noBatches.batches.length, 0);
+
+var manyCaps = N.importSnapshot({ captures: new Array(80).fill(0).map(function (_, i) {
+  return { agentId: "qoder", url: "https://qoder.com/api/" + i, bodyPreview: "{}", score: i };
+}) }, { agents: ["qoder"] });
+eq("导入：样本上限 60 条", manyCaps.captures.length, 60);
+eq("导入：超上限时留高分的那批", manyCaps.captures[0].score, 79);
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

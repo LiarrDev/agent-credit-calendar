@@ -96,6 +96,10 @@
             } catch (e) {}
             if (/text\/event-stream/i.test(ct)) return;
             if (cl > 2000000) return;
+            // 分块传输（无 content-length）只能靠类型挡：下载、PDF、音视频这些
+            // 读进内存没有意义，而 clone().text() 会把它整条缓冲进页面。
+            if (/^(image|audio|video|font)\//i.test(ct)) return;
+            if (/application\/(octet-stream|pdf|zip|gzip|x-protobuf|wasm|font)/i.test(ct)) return;
             res.clone().text().then(function (text) {
               var whole = String(text);
               post({ url: url, method: method, status: res.status,

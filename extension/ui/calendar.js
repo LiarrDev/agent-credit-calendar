@@ -762,7 +762,12 @@
 
   function renderCaptureList(box, agentId) {
     var caps = (doc.captures || []).filter(function (c) { return c.agentId === agentId; })
-      .sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+      // 同分时新的在前：与 pickCapture（adapters/index.js，按 at 降序）同一口径。
+      // 否则"排第一的那条"可能是几分钟前的旧样本，而真正被 adapter 采用的是另一条。
+      .sort(function (a, b) {
+        return (b.score || 0) - (a.score || 0)
+          || (String(b.at || "") < String(a.at || "") ? -1 : 1);
+      });
     capList = caps;   // 导出按钮靠 key 回查，见 capByKey
     var a = doc.agents[agentId];
     box.innerHTML = '<button class="mini" data-act="backauth">‹ 返回平台列表</button>'
@@ -1071,6 +1076,7 @@
         else patch[f] = v;
       });
       var next = N.applyManualEdit(cur, patch);
+      if (!next) { toast("批次名称不能为空（只有空格也算空）"); return; }
       var oldId = cur.batchId;
       // batchId 是 32 位哈希取前 8 位，理论上会撞。补录路径已经挡了，编辑路径也得挡：
       // byId() 只返回第一个匹配，撞了就变成"改 A 实际改了 B"，而且没有提示。
@@ -1087,6 +1093,8 @@
     if (act === "addsave") {
       var v = {};
       $$("#detail [data-nf]").forEach(function (inp) { v[inp.getAttribute("data-nf")] = inp.value; });
+      // 只有空格的名字会变成 dedupKey 里的空段，两笔"空名"批次互相覆盖且看不出来
+      v.label = String(v.label || "").trim();
       if (!v.label || !v.expiresAt) { toast("批次名称和过期日不能为空"); return; }
       var cfg = doc.agents[v.agent] || {};
       var nb = N.normalizeBatch({
