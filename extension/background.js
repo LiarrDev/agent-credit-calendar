@@ -628,6 +628,7 @@ function settleAuthCapture(agentId, abs, entry, stored) {
           ag.authResult = {
             at: new Date().toISOString(), ok: true,
             added: s.added, updated: s.updated, conflicts: s.conflicts, total: s.total,
+            closed: s.closed, reopened: s.reopened,
             endpoint: s.capture && s.capture.url,
             message: "日历已写入 " + s.total + " 个批次。"
           };
@@ -1374,7 +1375,16 @@ function syncOne(agentId, now) {
       });
     }
     return CreditStore.update(function (d) {
-      var merged = CreditNormalize.mergeBatches(d.batches, res.batches, { now: now });
+      // 权威清单直接来自 adapter，但只在"这份样本是活读的"时生效：
+      // 粘贴进来的是历史快照，拿它去关批次会把现在还在的钱关掉（见 mergeBatches 规则 5）。
+      var ad = CreditAdapters.get(agentId);
+      var live = res.capture && res.capture.via !== "paste";
+      var authoritative = {};
+      if (ad && ad.authoritative && live) authoritative[agentId] = true;
+
+      var merged = CreditNormalize.mergeBatches(d.batches, res.batches, {
+        now: now, authoritative: authoritative
+      });
       d.batches = merged.batches;
       var a = d.agents[agentId];
       if (a) {
@@ -1388,6 +1398,7 @@ function syncOne(agentId, now) {
         ok: true, agentId: agentId,
         added: merged.added, updated: merged.updated,
         conflicts: merged.conflicts, unchanged: merged.unchanged,
+        closed: merged.closed, reopened: merged.reopened,
         total: merged.batches.length, capture: res.capture,
         sampleAt: res.capture && res.capture.at ? res.capture.at : null
       };

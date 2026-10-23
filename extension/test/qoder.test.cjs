@@ -68,8 +68,18 @@ eq("真 adapter 已注册", D.has("qoder"), true);
 var oldPaste = Object.assign({}, capture, { via: "paste", score: 11, at: "2026-10-20T00:00:00Z" });
 var freshDirect = Object.assign({}, capture, { via: "direct", score: 8, at: "2026-10-21T01:00:00Z" });
 eq("直读样本优先于旧的粘贴样本", D.pickCapture([oldPaste, freshDirect], "qoder").via, "direct");
-eq("没有直读样本时仍按分数选", D.pickCapture([oldPaste,
-  Object.assign({}, capture, { via: "paste", score: 9, at: "2026-10-21T02:00:00Z" })], "qoder").score, 11);
+// v0.3.17 改了口径：同一个接口的多份样本按时间取新的，分数只在跨接口时用。
+// 旧的写法（分数优先）会被"余额花完 → 额度字段变少 → 分数反而更低"打穿，
+// 于是永远选回那份胖的旧样本，刷新看起来毫无变化。
+eq("同一接口的两份样本取新的那份",
+  D.pickCapture([oldPaste,
+    Object.assign({}, capture, { via: "paste", score: 9, at: "2026-10-21T02:00:00Z" })], "qoder").at,
+  "2026-10-21T02:00:00Z");
+eq("不同接口之间仍按分数决定",
+  D.pickCapture([
+    Object.assign({}, capture, { url: "https://qoder.com/api/v2/me/usages/other", score: 5, at: "2026-10-21T03:00:00Z" }),
+    Object.assign({}, capture, { url: "https://qoder.com/api/v2/me/usages/big_model_credits", score: 11, at: "2026-10-20T03:00:00Z" })
+  ], "qoder").score, 11);
 
 /* v0.3 直读配方：接口与页面地址必须和前端 bundle 里的调用一致。
  * 少一个 CSRF/timezone 标志都会让页面内请求和站点自己的请求长得不一样。 */

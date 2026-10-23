@@ -264,6 +264,9 @@ function runRefresh(dropOnChanged, fastWait) {
     console.log("--- 场景 7：同一平台的并发刷新要被互斥挡住（v0.3.16）");
     return concurrentChecks();
   }).then(function () {
+    console.log("--- 场景 8：后台不再返回的批次必须从余额里剔掉（v0.3.17）");
+    return goneChecks();
+  }).then(function () {
     console.log("\n" + pass + " passed, " + fail + " failed");
     process.exit(fail ? 1 : 0);
   }, function (e) {
@@ -400,5 +403,141 @@ function pruneChecks() {
     ok("清理：同接口只剩完整样本", caps.length === 1 && !caps[0].truncated,
       caps.map(function (c) { return { truncated: c.truncated, len: c.bodyLength }; }));
     ok("清理：探针记下 superseded", p.superseded === 1, p.superseded);
+  });
+}
+
+/**
+ * 场景 8：LobsterAI 的「刷新后说没变化，但和后台对不上」。
+ *
+ * 真机症状：卡片「可用」2115.98，后台 1984.64，差的 131.35 正好是 5 笔
+ * 已经从 creditItems 里消失的批次；每次点刷新又都报「数字无变化」。
+ *
+ * 这条链路横跨三处接线，单测各自都过：
+ *   1. pickCapture 要选到**新**样本（余额变少 → 额度字段变少 → 分数反而更低）
+ *   2. runSync 要把样本来源（via）带出来
+ *   3. syncOne 只对「活读 + adapter 标了 authoritative」的平台关批次
+ */
+function goneChecks() {
+  var LIM = "https://lobsterai-server.youdao.com/api/user/profile-summary";
+  var PAGE2 = "https://lobsterai.youdao.com/portal#/profile";
+  var mem = {}, listeners = [];
+  var chrome = {
+    runtime: {
+      lastError: null,
+      getURL: function (p) { return "chrome-extension://test/" + p; },
+      onMessage: { addListener: function (fn) { listeners.push(fn); }, removeListener: function () {} },
+      onInstalled: { addListener: function () {} },
+      onStartup: { addListener: function () {} }
+    },
+    action: { onClicked: { addListener: function () {} } },
+    storage: {
+      local: {
+        get: function (k) { return Promise.resolve(mem[k] ? (function () { var o = {}; o[k] = JSON.parse(JSON.stringify(mem[k])); return o; })() : {}); },
+        set: function (o) { Object.keys(o).forEach(function (k) { mem[k] = JSON.parse(JSON.stringify(o[k])); }); return Promise.resolve(); },
+        remove: function (k) { delete mem[k]; return Promise.resolve(); }
+      },
+      onChanged: { addListener: function () {}, removeListener: function () {} }
+    },
+    tabs: {
+      create: function () { return Promise.resolve({ id: 1 }); },
+      get: function () { return Promise.resolve({ status: "complete", url: PAGE2 }); },
+      remove: function () { return Promise.resolve(); }
+    },
+    scripting: {
+      registerContentScripts: function () { return Promise.resolve(); },
+      unregisterContentScripts: function () { return Promise.resolve(); },
+      executeScript: function () { return Promise.resolve([{ result: null }]); }
+    }
+  };
+  var sandbox = {
+    console: { log: function () {}, warn: function () {}, error: function () {} },
+    chrome: chrome,
+    setTimeout: setTimeout, setInterval: setInterval,
+    clearInterval: clearInterval, clearTimeout: clearTimeout,
+    URL: URL, URLSearchParams: URLSearchParams
+  };
+  var ctx = vm.createContext(sandbox);
+  sandbox.importScripts = function () {
+    for (var i = 0; i < arguments.length; i++) {
+      vm.runInContext(fs.readFileSync(path.join(ROOT, arguments[i]), "utf8"), ctx, { filename: arguments[i] });
+    }
+  };
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "background.js"), "utf8"), ctx, { filename: "background.js" });
+
+  function body(items) {
+    return JSON.stringify({
+      code: 0, message: "success",
+      data: {
+        id: 1, nickname: "u",
+        totalCreditsRemaining: items.reduce(function (s, i) { return s + i.creditsRemaining; }, 0),
+        creditItems: items
+      }
+    });
+  }
+  function item(remaining, expiresAt) {
+    return { type: "campaign", label: "每日登录奖励", labelEn: "Daily Login Reward",
+      creditsRemaining: remaining, expiresAt: expiresAt };
+  }
+  // 8 笔 → 1 笔：花完的那 7 笔平台不再返回。
+  // 笔数变少 → 响应里的额度字段也跟着变少 → 启发式分数从 9 掉到 4（没有两个以上日期，连日期分都拿不到）。
+  // 这正是"按分数选样本"会永远选回旧样本的原因，所以断言必须钉住分数是反的。
+  function days(n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(item(100, "2027-03-" + ("0" + (9 + i * 2)).slice(-2) + "T09:12:44"));
+    return out;
+  }
+  var fat = body(days(8));
+  var thin = body(days(1));
+  function cap(b, at) {
+    return { agentId: "lobsterai", url: LIM, method: "GET", status: 200,
+      score: 0, at: at, bodyPreview: b, bodyLength: b.length, truncated: false, via: "fetch" };
+  }
+  // 分数用真实打分器算，别手写：这里要证的就是「新样本分数更低」
+  var c8 = cap(fat, "2027-03-01T00:00:00.000Z"), c1 = cap(thin, "2027-03-02T00:00:00.000Z");
+  c8.score = ctx.CreditAgents.scoreCapture(LIM, fat).score;
+  c1.score = ctx.CreditAgents.scoreCapture(LIM, thin).score;
+
+  mem[KEY] = {
+    schema: 1, batches: [], captures: [c8],
+    agents: { lobsterai: { id: "lobsterai", name: "LobsterAI", unit: "credits",
+      origin: "https://lobsterai.youdao.com", consoleUrl: PAGE2,
+      fetchMode: "capture", hookActive: false, endpoint: LIM, enabled: true } },
+    settings: { threshold: 14, staleDays: 7, lazySyncDays: 3 }, lastSyncAt: null, ui: {}
+  };
+
+  function sync() {
+    return new Promise(function (res) {
+      listeners.forEach(function (fn) { fn({ type: "SYNC", agentId: "lobsterai" }, {}, res); });
+    });
+  }
+
+  return sync().then(function (r) {
+    ok("批次消失：第一次同步写入 8 笔", !!(r && r.ok) && mem[KEY].batches.length === 8,
+      { ok: r && r.ok, n: mem[KEY].batches.length });
+    ok("批次消失：新样本分数确实更低（旧 9 → 新 4）", c1.score < c8.score, { old: c8.score, now: c1.score });
+    // 第二份样本入库，平台少返回了 7 笔
+    return ctx.CreditStore.update(function (d) { d.captures.push(c1); });
+  }).then(function () {
+    return sync();
+  }).then(function (r) {
+    ok("批次消失：同步成功", !!(r && r.ok), r);
+    ok("批次消失：选中的是**新**样本（少 7 笔）", r && r.updated === 0 && r.closed === 7,
+      { updated: r && r.updated, closed: r && r.closed, added: r && r.added });
+    var closed = mem[KEY].batches.filter(function (b) { return b.closed; });
+    ok("批次消失：消失的 7 笔被关掉", closed.length === 7, closed.map(function (b) { return b.expiresAt; }));
+    ok("批次消失：不删历史", mem[KEY].batches.length === 8, mem[KEY].batches.length);
+    var live = mem[KEY].batches.filter(function (b) { return !b.closed; })
+      .reduce(function (s, b) { return s + b.remaining; }, 0);
+    ok("批次消失：余额重新对上后台（100，不是 800）", live === 100, live);
+    // 粘贴样本不能用来关批次：它是历史快照
+    return ctx.CreditStore.update(function (d) {
+      d.captures.push(Object.assign({}, cap(thin, "2027-03-03T00:00:00.000Z"), { via: "paste" }));
+      d.batches.forEach(function (b) { delete b.closed; delete b.closedAt; });
+      d.captures = d.captures.filter(function (c) { return c !== c1; });
+    });
+  }).then(function () {
+    return sync();
+  }).then(function (r) {
+    ok("绑定：粘贴样本不按权威口径关批次", r && r.closed === 0, r && r.closed);
   });
 }

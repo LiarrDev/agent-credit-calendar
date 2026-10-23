@@ -62,6 +62,15 @@ eq("接口提示优先于更高分", D.pickCapture(hintedCaps, "qoder").url, "ht
 eq("接口提示圈内仍比分", D.pickCapture(hintedCaps.slice(1), "qoder").score, 9);
 eq("没有接口匹配时退回总分", D.pickCapture(hintedCaps.slice(0, 1), "qoder").url, "https://x/api/plans");
 
+/* v0.3.17：同一个接口的多份样本按时间取新的。
+ * 分数是接口形状的属性，不是新鲜度；余额被花完后字段变少、分数反而更低，
+ * 按分数选会永远选回那份胖的旧样本 —— 表现就是「刷新了但数字和后台对不上」。 */
+var sameUrlCaps = [
+  { agentId: "qoder", url: "https://x/api/credit", score: 9, at: "2026-10-20T00:00:00Z", bodyPreview: "{}" },
+  { agentId: "qoder", url: "https://x/api/credit", score: 5, at: "2026-10-23T00:00:00Z", bodyPreview: "{}" }
+];
+eq("同一接口取最新，哪怕分数更低", D.pickCapture(sameUrlCaps, "qoder").at, "2026-10-23T00:00:00Z");
+
 /* runSync 走通：样本 -> 批次 */
 var r = D.runSync("qoder", caps, new Date(2026, 9, 21));
 eq("选中那条没认出批次就说 no-rows", r.reason, "no-rows");

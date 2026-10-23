@@ -17,7 +17,12 @@
  *     extract: function (capture) { return [ ... ]; },
  *     // 可选：已知接口的页面内直读配置（目前只有 Qoder）。
  *     // 有 direct 的平台不再注入钩子，background 会开同源页执行一次只读 GET。
- *     direct: { url, pageUrl, loginPath, method: "GET", headers, csrf, timezone }
+ *     direct: { url, pageUrl, loginPath, method: "GET", headers, csrf, timezone },
+ *     // 可选：这份响应是否枚举了该平台**当下的全部**批次（目前只有 LobsterAI）。
+ *     // 标了 authoritative 的平台，同步时"本次没出现"的批次会被关掉（closed），
+ *     // 不再计入余额——因为它的接口是把花完的批次直接摘掉，而不是给 0。
+ *     // 只对活读样本生效，粘贴的旧样本不会用这个口径去关批次。
+ *     authoritative: true
  *   }
  *
  * 当前 Qoder / LobsterAI / TRAE / WorkBuddy 四家已进 registry；没有样本的平台仍会
@@ -74,9 +79,19 @@
     // 不能让它在完整样本入库后继续被选中；只有全都截断时才保留它来报 truncated。
     var usable = pool.filter(function (c) { return !c.truncated; });
     if (usable.length) pool = usable;
+    // 同一个接口的多份样本：**新的赢**，分数只在跨接口时用来分高下。
+    //
+    // 分数衡量的是"这个接口像不像额度数据"，是接口形状的属性，跟新鲜度无关；
+    // 一旦 hint 已经把范围收到唯一一个接口，再按分数排就会出错——而错误方向
+    // 恰好是最糟的那种：批次变少（余额被花完）时响应里的额度字段跟着变少，
+    // 新样本分数反而更低（实测：15 笔 → 9 分，2 笔 → 7 分），于是永远选回旧样本，
+    // 表现就是「点了刷新、数字不动、和后台对不上」。v0.3.17 修的就是这个。
+    var sameUrl = pool.length > 1 && pool.every(function (c) { return c.url === pool[0].url; });
     pool.sort(function (a, b) {
+      var byAt = String(b.at || "").localeCompare(String(a.at || ""));
+      if (sameUrl) return byAt;
       var s = (b.score || 0) - (a.score || 0);
-      return s !== 0 ? s : String(b.at || "").localeCompare(String(a.at || ""));
+      return s !== 0 ? s : byAt;
     });
     return pool[0] || null;
   }
@@ -114,7 +129,12 @@
     if (!batches.length) {
       return { ok: false, reason: "no-rows", message: "认出了条目，但没有一条能拿到合法的到期日" };
     }
-    return { ok: true, batches: batches, capture: { url: capture.url, score: capture.score || 0, at: capture.at } };
+    return {
+      ok: true, batches: batches,
+      // via 要带出去：syncOne 只有知道这份样本是活读的还是粘贴的，才敢用
+      // 「没出现 = 这笔没了」去关批次（见 mergeBatches 规则 5）。
+      capture: { url: capture.url, score: capture.score || 0, at: capture.at, via: capture.via || null }
+    };
   }
 
   var api = {

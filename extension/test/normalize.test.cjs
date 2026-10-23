@@ -131,6 +131,34 @@ eq("采纳后清冲突", accepted.conflict, undefined);
 r = N.mergeBatches([manual], [mk({ remaining: 100 })], { now: today });
 eq("抓取值与手填一致时不算冲突", r.conflicts, 0);
 
+/* ---------- 权威清单：没出现 = 这笔不在了（v0.3.17） ----------
+ * 真机场景（LobsterAI）：平台把花完的批次从 creditItems 里整条摘掉，不会给 0。
+ * 只记 absentCount 的话它会永远停在最后一次见到的余额上，余额比后台只多不少，
+ * 而每次同步都只报「数字无变化」。
+ */
+r = N.mergeBatches([mk()], [mk({ label: "加购包" })], { now: today, authoritative: { qoder: true } });
+eq("权威清单里没出现 -> 关掉这笔", r.batches[0].closed, true);
+eq("关掉的笔数单独报出来", r.closed, 1);
+eq("关闭时刻落盘（供 UI 说「什么时候起没再返回」）", r.batches[0].closedAt, today.toISOString());
+eq("仍然不删除历史", r.batches.length, 2);
+eq("缺席计数照常累加", r.batches[0].absentCount, 1);
+
+r = N.mergeBatches([mk()], [mk({ label: "加购包" })], { now: today });
+eq("没有标权威的平台不关批次（其它三家可能只返回部分批次）", !r.batches[0].closed, true);
+
+r = N.mergeBatches([mk()], [], { now: today, authoritative: { qoder: true } });
+eq("一次都没抓到（抓取失败）不许关批次", !r.batches[0].closed, true);
+
+var closedOnce = N.mergeBatches([mk()], [mk({ label: "加购包" })], { now: today, authoritative: { qoder: true } });
+r = N.mergeBatches(closedOnce.batches, [mk()], { now: today, authoritative: { qoder: true } });
+eq("平台又返回了 -> 重新计入", r.batches[0].closed, undefined);
+eq("重新计入的笔数单独报出来", r.reopened, 1);
+eq("再次出现时清掉关闭时刻", r.batches[0].closedAt, undefined);
+eq("重新计入的那笔不算「新关掉」，被落下的那笔才计入", r.closed, 1);
+
+r = N.mergeBatches([manual], [mk({ label: "加购包" })], { now: today, authoritative: { qoder: true } });
+eq("手改过的批次不自动关（用户认的钱优先）", !r.batches[0].closed, true);
+
 /* ---------- 脱敏 ---------- */
 var cap = N.sanitizeCapture({
   url: "https://x.dev/api/credits", method: "GET", status: 200,
@@ -273,6 +301,14 @@ eq("导入：batchId 一律按内容重算", imported.batches[0].batchId, N.batc
 eq("导入：只留下 1 条合法样本", imported.captures.length, 1);
 eq("导入：非 http(s) 的接口地址被丢掉", imported.droppedCaptures, 2);
 eq("导入：样本补上 agentId/score", [imported.captures[0].agentId, imported.captures[0].score], ["qoder", 5]);
+
+// 「后台已不再返回」也得能原样导回来：丢了它，那笔钱在新机器上又会变成可用余额
+var goneImport = N.importSnapshot({
+  batches: [{ agent: "lobsterai", label: "每日登录奖励 11-07", granted: 100, remaining: 100,
+    expiresAt: "2026-11-07", closed: true, closedAt: "2026-10-23T09:09:40.000Z" }]
+}, { agents: ["lobsterai"] });
+eq("导入：保留「已不在后台返回」标记", goneImport.batches[0].closed, true);
+eq("导入：保留关闭时刻", goneImport.batches[0].closedAt, "2026-10-23T09:09:40.000Z");
 
 var emptyImport = N.importSnapshot(null, { agents: ["qoder"] });
 eq("导入：null 不抛异常，返回空结果", [emptyImport.batches.length, emptyImport.captures.length], [0, 0]);

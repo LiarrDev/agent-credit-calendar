@@ -55,9 +55,17 @@ var capture = {
 
 eq("真 adapter 已注册", D.has("lobsterai"), true);
 eq("这是钩子平台，没有 direct 配置", D.get("lobsterai").direct, undefined);
+// creditItems 就是当下全部批次，平台把花完的整条摘掉 —— 同步时"没出现"才能关批次
+eq("标了权威清单", D.get("lobsterai").authoritative, true);
 
 var rows = D.get("lobsterai").extract(capture);
 eq("只认 creditItems：无到期日/无剩余量跳过，0 保留", rows.length, 4);
+/* 对账：明细之和必须等于服务端的 totalCreditsRemaining。
+ * 这条断言是 v0.3.17 那个 bug 的照妖镜——当时本机合计比后台高 131.35，
+ * 就是因为已经消失的批次还留在本地余额里。 */
+eq("明细之和等于服务端合计（映射没漏项）",
+  rows.reduce(function (s, r) { return s + r.remaining; }, 0),
+  JSON.parse(BODY).data.totalCreditsRemaining);
 eq("同名每日奖励用最后可用日区分", rows.map(function (r) { return r.label; }),
   ["每日登录奖励 10-23", "每日登录奖励 10-27", "加油包 09-13", "每日登录奖励 10-29"]);
 eq("granted 暂用剩余量填，不是 0", rows.map(function (r) { return [r.granted, r.remaining]; }),
@@ -129,6 +137,26 @@ eq("截断样本报截断", D.runSync("lobsterai",
 /* 这个平台的接口和页面不同源，但 adapter 只认响应，不关心 URL */
 var otherHost = Object.assign({}, capture, { url: "https://lobsterai-server.youdao.com/other/path" });
 eq("adapter 不看 URL 路径", D.get("lobsterai").extract(otherHost).length, 4);
+
+/* v0.3.17：花完的批次被平台整条摘掉 —— 本机必须跟着把它从余额里剔掉。
+ * 真机症状：日历「可用」2115.98，后台 1984.64，差的 131.35 正好是 5 笔消失批次的
+ * 残留之和；而且每次刷新都报「数字无变化」，因为留下的那些一笔都没动。 */
+var gone = JSON.parse(BODY);
+gone.data.creditItems = gone.data.creditItems.filter(function (i) {
+  return i.expiresAt !== "2026-10-28T09:19:47";      // 这笔花完了，平台不再返回
+});
+gone.data.totalCreditsRemaining = 1100;
+var mg = N.mergeBatches(m2.batches, D.runSync("lobsterai",
+  [Object.assign({}, capture, { bodyPreview: JSON.stringify(gone) })], now).batches,
+  { now: now, authoritative: { lobsterai: true } });
+eq("消失的批次被关掉", mg.closed, 1);
+eq("没动的批次不算更新（这正是旧版报「数字无变化」的原因）", mg.updated, 0);
+var goneOne = mg.batches.filter(function (b) { return b.closed; })[0];
+eq("关掉的是那笔", goneOne.remaining, 50.5);
+eq("不删历史", mg.batches.length, 4);
+var liveSum = mg.batches.filter(function (b) { return !b.closed; })
+  .reduce(function (s, b) { return s + b.remaining; }, 0);
+eq("余额合计重新对上服务端", liveSum, 1100);
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

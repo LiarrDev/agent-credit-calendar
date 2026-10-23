@@ -127,25 +127,47 @@
   function ORDER() { return AG.AGENTS.map(function (a) { return a.id; }); }
   function colorOf(id) { var a = AG.byId(id); return a ? a.color : "#888"; }
   function isExpired(b) { var d = N.daysLeft(b.expiresAt, TODAY); return d != null && d < 0; }
+  /* 平台已经不再返回的批次（只有 authoritative 平台会标）：历史留着备查，
+   * 但一分钱都不该计入余额、日历和「即将到期」——它已经不在后台了，
+   * 余额是 0 也好、被平台回收也好，本机都无从知道，唯一确定的结论是"这钱不在了"。 */
+  function isGone(b) { return b.closed === true; }
+  /* 右侧副列表的目标：'<agent>' = 已过期未用完；'<agent>|gone' = 已不在后台返回。
+   * 复用同一个 wasted 状态（它已经在十几个 handler 里被置 null、也跟着 doc.ui 落盘），
+   * 新开一个变量意味着每个重置点都要同步改，漏一个就会显示错的面板。 */
+  function listTarget() {
+    if (!wasted) return null;
+    var s = String(wasted), i = s.indexOf("|");
+    return i < 0
+      ? { agent: s, kind: "expired" }
+      : { agent: s.slice(0, i), kind: s.slice(i + 1) };
+  }
   function byId(id) {
     for (var i = 0; i < doc.batches.length; i++) if (doc.batches[i].batchId === id) return doc.batches[i];
     return null;
   }
   function expiringOn(dayStr) {
-    return doc.batches.filter(function (b) { return b.expiresAt === dayStr; })
+    return doc.batches.filter(function (b) { return !isGone(b) && b.expiresAt === dayStr; })
       .sort(function (a, c) { return c.remaining - a.remaining; });
   }
   function upcoming() {
     var lim = doc.settings.threshold;
-    return doc.batches.filter(function (b) { var d = N.daysLeft(b.expiresAt, TODAY); return d != null && d >= 0 && d <= lim; })
+    return doc.batches.filter(function (b) {
+      if (isGone(b)) return false;
+      var d = N.daysLeft(b.expiresAt, TODAY); return d != null && d >= 0 && d <= lim;
+    })
       .sort(function (a, c) { return N.daysLeft(a.expiresAt, TODAY) - N.daysLeft(c.expiresAt, TODAY); });
   }
   function agentSummary(agent) {
     var all = doc.batches.filter(function (b) { return b.agent === agent; });
-    var act = all.filter(function (b) { return !isExpired(b); });
-    var exp = all.filter(function (b) { return isExpired(b); });
+    // 先劈掉"后台已经不再返回"的那批，再看过没过期：它们既不是可用余额，
+    // 也不是"过期作废"，是第三种状态（消失了），得单独说出来。
+    var gone = all.filter(isGone);
+    var live = all.filter(function (b) { return !isGone(b); });
+    var act = live.filter(function (b) { return !isExpired(b); });
+    var exp = live.filter(function (b) { return isExpired(b); });
     var total = 0; act.forEach(function (b) { total += b.remaining; });
     var lost = 0; exp.forEach(function (b) { lost += b.remaining; });
+    var goneSum = 0; gone.forEach(function (b) { goneSum += b.remaining; });
     var manualCount = 0, conflicts = 0;
     act.forEach(function (b) { if (b.manualEdited) manualCount++; if (b.conflict) conflicts++; });
     var soonest = null;
@@ -157,6 +179,7 @@
     return {
       agent: agent, name: cfg.name || agent, unit: cfg.unit || "credits",
       count: act.length, total: total, wasted: lost, wastedCount: exp.length,
+      goneCount: gone.length, goneSum: goneSum,
       manualCount: manualCount, conflicts: conflicts, soonest: soonest,
       capturedAt: (newest && newest.capturedAt) || cfg.lastSyncAt || null,
       fetchMode: cfg.fetchMode || "unauthorized"
@@ -226,6 +249,14 @@
             + "已过期未用完 <b>" + fmt(s.unit, s.wasted) + unitTail(s.unit) + "</b>（" + s.wastedCount + " 笔）"
             + '<span class="ar">查看 ›</span></div>'
           : "")
+        // 第三种状态必须自己占一行：不是余额、也不是"过期作废"。
+        // 不写出来的话，用户只会看到"刷新了但余额没变"，然后去后台发现对不上。
+        + (s.goneCount
+          ? '<div class="wasted" data-act="closed" data-agent="' + s.agent + '">'
+            + "已不在后台返回 <b>" + fmt(s.unit, s.goneSum) + unitTail(s.unit) + "</b>（"
+            + s.goneCount + " 笔 · 已从余额剔除）"
+            + '<span class="ar">查看 ›</span></div>'
+          : "")
         + "</div>";
     }).join("");
   }
@@ -245,6 +276,7 @@
   function renderCal() {
     var y = view[0], mo = view[1];
     var inMonth = doc.batches.filter(function (b) {
+      if (isGone(b)) return false;
       var d = N.parseYmd(b.expiresAt); return d && d.getFullYear() === y && d.getMonth() === mo;
     }).length;
     $("#moTitle").innerHTML = y + " 年 " + (mo + 1) + " 月<span>" + inMonth + " 笔到期</span>";
@@ -328,7 +360,8 @@
     // 而 storage 变更、同步结果、定时刷新都会走到这里。
     if (adding) return;
     if (edit) return renderEdit(box, byId(edit));
-    if (wasted) return renderWasted(box, wasted);
+    var t = listTarget();
+    if (t) return t.kind === "gone" ? renderGone(box, t.agent) : renderWasted(box, t.agent);
 
     if (sel) {
       var items = expiringOn(sel), d = N.daysLeft(sel, TODAY);
@@ -356,7 +389,9 @@
   }
 
   function renderWasted(box, agent) {
-    var exp = doc.batches.filter(function (b) { return b.agent === agent && isExpired(b); })
+    // 已消失的批次单独列在「已不在后台返回」里：两边都画会出现同一笔在两处，
+    // 而卡片上那个合计只算过期、不算消失（agentSummary 的口径），数字对不上就成了新 bug。
+    var exp = doc.batches.filter(function (b) { return b.agent === agent && !isGone(b) && isExpired(b); })
       .sort(function (a, c) { return a.expiresAt < c.expiresAt ? -1 : 1; });
     if (!exp.length) { wasted = null; return renderDetail(); }
     var sum = 0; exp.forEach(function (b) { sum += b.remaining; });
@@ -377,6 +412,44 @@
       + "</div>"
       + '<div class="hint">这块是"沉没成本"，只用于回看：一是判断哪些平台你其实用不完、不该再加购；'
       + "二是校准提醒阈值该往前挪几天。</div>";
+  }
+
+  /**
+   * 「已不在后台返回」——第三种状态，必须和"过期作废"分开讲。
+   *
+   * 触发场景（2026-10-23 真机）：LobsterAI 把花完的每日奖励从 creditItems 里
+   * 整条摘掉，而不是把剩余量写成 0。本机如果只按 abstentCount 记个"最近 N 次没
+   * 返回"，这 5 笔就会永远以最后一次见到的非 0 余额留在余额里（差 131.35），
+   * 而且每次同步都只报「数字无变化」。现在它们被标 closed、单独列在这里。
+   *
+   * 保留历史而不删除的理由：用户可能想知道"那笔 100 是花掉的还是被平台收回的"，
+   * 删掉就彻底查无此事了。点开还能手动改（改成 0 或改过期日）。
+   */
+  function renderGone(box, agent) {
+    var gone = doc.batches.filter(function (b) { return b.agent === agent && isGone(b); })
+      .sort(function (a, c) { return a.expiresAt < c.expiresAt ? -1 : 1; });
+    if (!gone.length) { wasted = null; return renderDetail(); }
+    var sum = 0; gone.forEach(function (b) { sum += b.remaining; });
+    var unit = (doc.agents[agent] || {}).unit || "credits";
+    box.innerHTML = '<div class="sec-h"><h3>已不在后台返回</h3>'
+      + '<span class="cnt" style="color:var(--ink-3);cursor:pointer" data-act="close">关闭 ✕</span></div>'
+      + '<div class="sec-b" style="--c:' + colorOf(agent) + '">'
+      + '<div style="padding:8px 8px 4px;font-size:12.5px;color:var(--ink-2)">'
+      + esc((doc.agents[agent] || {}).name || agent) + " · 共 <b>" + fmt(unit, sum) + unitTail(unit)
+      + "</b> 已经不在这家平台的额度列表里，<b>不计入余额</b></div>"
+      + gone.map(function (b) {
+          return '<div class="row" data-bid="' + b.batchId + '"><span class="bar"></span><div class="info">'
+            + '<div class="l1">' + esc(shortLbl(b.label)) + "</div>"
+            + '<div class="l2">' + b.expiresAt + " 到期 · "
+            + (b.closedAt ? ago(b.closedAt) + "起没再返回" : "最近 " + (b.absentCount || 0) + " 次没返回") + "</div></div>"
+            + '<div class="amt" style="color:var(--ink-3)">' + fmt(b.unit, b.remaining)
+            + "<small>" + unitLabel(b.unit) + " 不计</small></div></div>";
+        }).join("")
+      + "</div>"
+      + '<div class="hint">这些批次最后一次被看到之后就再没出现在后台的额度列表里——'
+      + "平台对花完的批次是整条摘掉、不会给 0，所以本机只能判定为「不在了」。"
+      + "留在明细里备查：点开可以手动改成 0 或改过期日，也可以直接删除。"
+      + "如果哪一笔其实还在（平台临时漏返回），下次同步它自己会重新计入。</div>";
   }
 
   function renderEdit(box, b) {
@@ -416,6 +489,8 @@
       + (b.updatedAt ? '<br><span style="color:#92400e">手动修改于 '
           + new Date(b.updatedAt).toLocaleString("zh-CN") + "（同步不再覆盖它的过期日）</span>" : "")
       + (b.absentCount ? '<br><span style="color:#9a3412">最近 ' + b.absentCount + " 次同步没返回这笔</span>" : "")
+      + (b.closed ? '<br><span style="color:#9a3412">后台已不再返回这笔，当前<b>不计入余额</b>'
+          + "（下次同步如果它回来了会自动恢复）</span>" : "")
       + "</div>"
       + '<div class="acts"><button class="primary" data-act="save">保存</button>'
       + '<button class="danger' + (delConfirm === b.batchId ? " armed" : "") + '" data-act="del">'
@@ -489,6 +564,7 @@
     if (r.ok) {
       return '<div class="hintline" style="color:#047857"><b>最近一次授权完成</b>：'
         + esc(r.message || "已写入日历") + (r.added ? "（新增 " + r.added + " 笔）" : "")
+        + (r.closed ? "（" + r.closed + " 笔后台已不再返回）" : "")
         + (r.at ? " · " + hm(r.at) : "") + "</div>";
     }
     return '<div class="hintline" style="color:#b45309"><b>最近一次授权未完成</b>：'
@@ -1000,6 +1076,8 @@
   $("#cards").addEventListener("click", function (e) {
     var w = e.target.closest('[data-act="wasted"]');
     if (w) { wasted = w.getAttribute("data-agent"); edit = null; adding = false; sel = null; persist(); render(); return; }
+    var g = e.target.closest('[data-act="closed"]');
+    if (g) { wasted = g.getAttribute("data-agent") + "|gone"; edit = null; adding = false; sel = null; persist(); render(); return; }
     var c = e.target.closest('[data-act="conflicts"]');
     if (c) {
       var first = doc.batches.filter(function (b) { return b.conflict && b.agent === c.getAttribute("data-agent"); })[0];
@@ -1148,7 +1226,9 @@
       if (r && r.ok) {
         var t = (r.results || []).filter(function (x) { return x.ok; }).map(function (x) {
           return x.agentId + " 新增 " + x.added + "/更新 " + x.updated
-            + (x.conflicts ? "，" + x.conflicts + " 笔待裁决" : "");
+            + (x.conflicts ? "，" + x.conflicts + " 笔待裁决" : "")
+            + (x.closed ? "，" + x.closed + " 笔后台已不再返回" : "")
+            + (x.reopened ? "，" + x.reopened + " 笔重新计入" : "");
         }).join("；");
         toast("同步完成：" + (t || "数字没有变化"));
 
@@ -1312,9 +1392,17 @@
           // 否则用户只知道"截到了"，不知道日历到底动没动。
           var s = r.sync;
           if (s && s.ok) {
-            toast("日历已更新：" + id + " 新增 " + s.added + "/更新 " + s.updated
-              + (s.conflicts ? "，" + s.conflicts + " 笔待裁决" : "")
-              + (s.added || s.updated || s.conflicts ? "" : "（数字无变化）"));
+            // 「数字无变化」这句话得说准：以前只比 added/updated，于是"平台把花完的批次
+            // 摘掉了、余额其实降了 131"这种最需要说清楚的情况，反而报成"没变"。
+            // 现在把 closed/reopened 一起算进结论，并且明说到底剔掉了多少笔。
+            var bits = "新增 " + s.added + "/更新 " + s.updated;
+            if (s.conflicts) bits += "，" + s.conflicts + " 笔待裁决";
+            if (s.closed) bits += "，" + s.closed + " 笔后台已不再返回（不计入余额）";
+            if (s.reopened) bits += "，" + s.reopened + " 笔重新计入";
+            if (!s.added && !s.updated && !s.conflicts && !s.closed && !s.reopened) {
+              bits += "（数字无变化）";
+            }
+            toast("日历已更新：" + id + " " + bits);
           } else if (s) {
             toast("样本读到了，但没能算进日历：" + (s.message || s.reason));
           }

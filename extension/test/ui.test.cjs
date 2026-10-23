@@ -103,10 +103,13 @@ function createUi(seed) {
     }
   };
   var ctx = vm.createContext(sandbox);
+  // 种子必须在加载脚本**之前**放进存储：calendar.js 末尾直接调 boot()，
+  // 而 chrome.storage.local.get 是同步取快照的（真浏览器里也是立刻发请求），
+  // 放到后面再塞就会渲染出一份空文档。
+  if (seed) mem[KEY] = seed;
   ["lib/agents.js", "lib/normalize.js", "lib/diagnose.js", "lib/store.js", "ui/calendar.js"].forEach(function (f) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), ctx, { filename: f });
   });
-  if (seed) mem[KEY] = seed;
   return { ctx: ctx, mem: mem, el: dom.el, deletes: deletes, reloaded: function () { return reloaded; } };
 }
 
@@ -207,6 +210,73 @@ booted(ui).then(function (ext) {
       ok("导入结构不对：提示没有可导入的内容",
         ext.el("#toast").textContent.indexOf("没有能导入") >= 0, ext.el("#toast").textContent);
     });
+  });
+}).then(function () {
+  /* ---------- 4. 「已不在后台返回」不计入余额（v0.3.17） ----------
+   * 真机症状：卡片写着「可用 2115」，平台后台只有 1984，差的是 5 笔已经消失的批次。
+   * 这里钉住三件事：卡片余额不含它们、卡片上要说出来、日历/即将到期不画它们。
+   */
+  var day = function (n) {
+    var d = new Date(); d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  };
+  var seed = seedDoc();
+  seed.agents.lobsterai = { id: "lobsterai", fetchMode: "capture", origin: "https://lobsterai.youdao.com", enabled: true };
+  seed.batches = [
+    { agent: "lobsterai", label: "在的 A", unit: "credits", granted: 500, remaining: 500,
+      expiresAt: day(20), batchId: "lob-a", capturedAt: new Date().toISOString(), source: "auto" },
+    { agent: "lobsterai", label: "在的 B", unit: "credits", granted: 100, remaining: 100,
+      expiresAt: day(25), batchId: "lob-b", capturedAt: new Date().toISOString(), source: "auto" },
+    { agent: "lobsterai", label: "消失的 C", unit: "credits", granted: 100, remaining: 100,
+      expiresAt: day(15), batchId: "lob-c", capturedAt: new Date().toISOString(), source: "auto",
+      closed: true, closedAt: new Date().toISOString(), absentCount: 3 }
+  ];
+  var ui2 = createUi(seed);
+  return booted(ui2).then(function (ext) {
+    var cards = ext.el("#cards").innerHTML;
+    // 按 data-agent 切卡片：卡片上显示的是 "LobsterAI"，和 agent id 不同名
+    var seg = cards.split('<div class="card"')
+      .filter(function (s) { return s.indexOf('data-agent="lobsterai"') >= 0; })[0] || "";
+    ok("卡片余额不含已消失的批次（500+100，不是 700）", seg.indexOf("600") >= 0, seg.slice(0, 260));
+    ok("卡片上没有把消失的 100 算进余额", seg.indexOf("可用") >= 0 && seg.indexOf("700") < 0, seg.slice(0, 260));
+    ok("卡片上明说「已不在后台返回」", seg.indexOf("已不在后台返回") >= 0, seg.slice(0, 400));
+    ok("「即将到期」不列已消失的批次",
+      ext.el("#upcoming").innerHTML.indexOf("消失的 C") < 0, ext.el("#upcoming").innerHTML.slice(0, 300));
+    ok("月历不画已消失的批次", ext.el("#grid").innerHTML.indexOf("消失的 C") < 0);
+  });
+}).then(function () {
+  /* ---------- 5. 「已不在后台返回」的详情面板 ----------
+   * 面板靠 doc.ui.wasted 恢复（'<agent>|gone'）。旧文档里存的是不带后缀的
+   * '<agent>'，那种值必须继续打开「已过期未用完」，不能被新编码带歪。
+   */
+  var day2 = function (n) {
+    var d = new Date(); d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  };
+  function seedWithPanel(wasted) {
+    var s = seedDoc();
+    s.agents.lobsterai = { id: "lobsterai", name: "LobsterAI", fetchMode: "capture", enabled: true };
+    s.ui = { wasted: wasted };
+    s.batches = [
+      { agent: "lobsterai", label: "消失的 C", unit: "credits", granted: 100, remaining: 100,
+        expiresAt: day2(15), batchId: "lob-c", capturedAt: new Date().toISOString(), source: "auto",
+        closed: true, closedAt: new Date().toISOString() },
+      { agent: "lobsterai", label: "过期作废的 D", unit: "credits", granted: 50, remaining: 50,
+        expiresAt: day2(-3), batchId: "lob-d", capturedAt: new Date().toISOString(), source: "auto" }
+    ];
+    return s;
+  }
+  var goneUi = createUi(seedWithPanel("lobsterai|gone"));
+  return booted(goneUi).then(function (ext) {
+    var d = ext.el("#detail").innerHTML;
+    ok("详情面板：打开「已不在后台返回」", d.indexOf("已不在后台返回") >= 0, d.slice(0, 200));
+    ok("详情面板：列出消失的那笔", d.indexOf("消失的 C") >= 0, d.slice(0, 300));
+    ok("详情面板：不把过期作废的那笔混进来", d.indexOf("过期作废的 D") < 0, d.slice(0, 300));
+    return booted(createUi(seedWithPanel("lobsterai")));
+  }).then(function (ext) {
+    var d = ext.el("#detail").innerHTML;
+    ok("详情面板：旧文档里的旧编码仍打开「已过期未用完」", d.indexOf("已过期未用完") >= 0, d.slice(0, 200));
+    ok("详情面板：旧编码不会误开「已不在后台返回」", d.indexOf("已不在后台返回") < 0, d.slice(0, 200));
   });
 }).then(function () {
   console.log("\n" + pass + " passed, " + fail + " failed");

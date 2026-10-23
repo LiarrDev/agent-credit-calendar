@@ -30,6 +30,13 @@
  *   - 剩余量为 0 的条目保留：用完后要能把余额更新到 0，否则它会永远停在旧数字。
  *   - code 非 0 时抛错，让 runSync 报 adapter-threw 并带上服务端 message；
  *     这是接口层失败，不能伪装成"没认出批次"。
+ *   - **标 authoritative**：creditItems 是当下全部批次，而且平台是把花完/回收的
+ *     批次**整条摘掉**，不是把 creditsRemaining 写成 0（2026-10-23 真机数据：
+ *     5 笔从列表里消失，本机余额一直停在 2115.98，后台其实是 1984.64，差 131.35
+ *     正好等于这 5 笔的残留之和）。所以"这次没出现"必须能关掉这批，
+ *     否则日历永远比后台高，而且每次同步都只报「数字无变化」。
+ *   - totalCreditsRemaining 仍是明细的合计，**不拿它当数据源**，只在
+ *     test/lobsterai.test.cjs 里当对账基准：明细之和必须等于它。
  */
 (function (root) {
   "use strict";
@@ -77,6 +84,8 @@
     // 必须精确到 profile-summary：portal 还会请求 credits-reset-campaign/status、
     // invitation/reward-credits 等带 credit 字样的接口，宽泛匹配会选错样本。
     endpointHint: /\/user\/profile-summary(?:[?#]|$)/i,
+    // 一次性返回全部批次，没出现的就是没了（理由见文件头）
+    authoritative: true,
     extract: extract
   };
   root.CreditAdapters.register("lobsterai", adapter);

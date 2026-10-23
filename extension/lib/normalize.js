@@ -311,12 +311,23 @@
    *   4. 这次没出现的批次 absentCount++，供 UI 提示"该平台已连续 N 次没返回这笔"。
    *      只在本次 incoming 覆盖到的 agent 内部计算；incoming 为空视为抓取失败，
    *      什么都不记——"抓不到"和"没有了"必须区分开。
+   *   5. opts.authoritative 里标了 true 的 agent（当前只有 LobsterAI）例外：它的
+   *      额度接口一次性返回**当下全部**批次，没出现就是真的不在了（花完 / 被平台
+   *      回收 / 被新的一笔替代）。这种批次标 closed=true，不删历史但不再计入余额。
+   *      为什么必须这么做：平台把花完的批次直接从列表里摘掉（不是给 0），
+   *      只靠规则 4 的话它会永远停在最后一次见到的非 0 余额上，「可用」比后台只多
+   *      不少、而且每次同步都只报「数字无变化」——正是 v0.3.17 修的那个毛病。
+   *      手改过的批次不自动关：那是用户自己认定的钱，只记 absentCount 让他裁决。
    *
-   * 返回 { batches, added, updated, conflicts, unchanged } ，batches 是新数组，不改动入参。
+   * 返回 { batches, added, updated, conflicts, unchanged, closed, reopened }，
+   * batches 是新数组，不改动入参。closed = 本次新关掉的笔数，
+   * reopened = 本次因为平台又返回而重新计入的笔数。
    */
   function mergeBatches(existing, incoming, opts) {
     opts = opts || {};
     var now = opts.now || new Date();
+    // { agentId: true } —— 这份响应是否枚举了该平台当下的全部批次（见规则 5）
+    var authoritative = opts.authoritative || {};
     var byKey = {}, out = [], i;
 
     for (i = 0; i < existing.length; i++) {
@@ -325,7 +336,7 @@
       out.push(e);
     }
 
-    var added = 0, updated = 0, conflicts = 0, unchanged = 0;
+    var added = 0, updated = 0, conflicts = 0, unchanged = 0, closed = 0, reopened = 0;
     var seen = {};
 
     // 手改过的批次额外按 (agent + label) 建索引。用户手改的经常就是过期日，
@@ -377,6 +388,14 @@
       }
 
       cur.absentCount = 0;
+
+      // 之前判为"已不在后台"的批次又回来了（平台临时漏项、或用户补买/恢复）：
+      // 立刻重新计入余额，closedAt 也不留——它现在是一笔活钱。
+      if (cur.closed) {
+        delete cur.closed;
+        delete cur.closedAt;
+        reopened++;
+      }
 
       if (cur.manualEdited) {
         // 过期状态照常跟着（用户填的）到期日走。手改之后这个分支是它唯一的更新入口，
@@ -433,10 +452,20 @@
       if (!seen[dedupKey(b)] && agentsInIncoming[b.agent]) {
         b.absentCount = (b.absentCount || 0) + 1;
         b.status = statusOf(b.expiresAt, now);
+        // 权威清单（见规则 5）：没出现 = 这笔真的不在后台了，从余额里剔除。
+        // 手改过的不动——用户的数字优先，UI 用 absentCount 提示他自己决定。
+        if (authoritative[b.agent] && !b.manualEdited && !b.closed) {
+          b.closed = true;
+          b.closedAt = now.toISOString();
+          closed++;
+        }
       }
     }
 
-    return { batches: out, added: added, updated: updated, conflicts: conflicts, unchanged: unchanged };
+    return {
+      batches: out, added: added, updated: updated, conflicts: conflicts,
+      unchanged: unchanged, closed: closed, reopened: reopened
+    };
   }
 
   /**
@@ -530,6 +559,13 @@
     };
     var upd = importIso(raw.updatedAt);
     if (upd) b.updatedAt = upd;
+    // 「后台已不再返回」是状态而不是数字：导出的备份要能原样导回来，
+    // 否则那些钱会在新机器上重新变成"可用余额"，余额又对不上后台。
+    if (raw.closed === true) {
+      b.closed = true;
+      var cl = importIso(raw.closedAt);
+      if (cl) b.closedAt = cl;
+    }
     // batchId 一律重算：文件里的值可能是手改的，撞车就会"改 A 影响 B"。
     b.batchId = batchId(b.agent, dedupKey(b));
     return b;
