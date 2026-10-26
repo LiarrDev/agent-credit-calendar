@@ -279,6 +279,38 @@ booted(ui).then(function (ext) {
     ok("详情面板：旧编码不会误开「已不在后台返回」", d.indexOf("已不在后台返回") < 0, d.slice(0, 200));
   });
 }).then(function () {
+  /* ---------- 6. 「立即同步」的临时钩子提示（v0.3.19） ----------
+   * 钩子已解除的平台现在也会被同步临时抓一次。提示必须说清楚「临时装钩子、
+   * 读完已注销」，否则用户会以为扩展又把钩子常驻装回去了。
+   */
+  var ui3 = createUi(seedDoc());
+  return booted(ui3).then(function (ext) {
+    // toast 队列靠 setTimeout 逐条排队；这里把长延时改成同步执行，直接看最后一条。
+    var realSetTimeout = ext.ctx.setTimeout;
+    ext.ctx.setTimeout = function (fn, ms) {
+      if (ms >= 2600) { fn(); return 0; }
+      return realSetTimeout(fn, ms);
+    };
+    ext.ctx.chrome.runtime.sendMessage = function (msg, cb) {
+      cb({
+        ok: true, ran: ["lobsterai"],
+        results: [{
+          agentId: "lobsterai", ok: true, fresh: true, ephemeral: true,
+          added: 1, updated: 0, sampleAt: new Date().toISOString()
+        }]
+      });
+    };
+    var btn = ext.el("#sync");
+    btn.onclick.call(btn, {});
+    return new Promise(function (res) { realSetTimeout(res, 30); }).then(function () {
+      var t = ext.el("#toast").textContent;
+      ok("同步提示：临时抓取要明说「读完已注销」", t.indexOf("临时装钩子，读完已注销") >= 0, t);
+      ok("同步提示：不再把临时抓取说成「没装钩子」", t.indexOf("没装钩子") < 0, t);
+      ok("同步提示：按钮已复位", btn.disabled === false && btn.textContent === "立即同步",
+        { disabled: btn.disabled, text: btn.textContent });
+    });
+  });
+}).then(function () {
   console.log("\n" + pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
 }, function (e) {

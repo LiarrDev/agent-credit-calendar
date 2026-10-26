@@ -1516,6 +1516,10 @@ function syncOne(agentId, now) {
 /**
  * UI 的「立即同步」不带 agentId：一次跑完所有已授权且有 adapter 的平台。
  * 没 adapter 的平台只在结果里说明原因，不写空数据——这是需求里定的硬规则。
+ *
+ * v0.3.19：显式点「立即同步」= 用户此刻就要活数据，所以没装常驻钩子的平台也会
+ * 临时装一次钩子（读完立刻注销，hookActive 保持 false）。决策 18 的边界没变：
+ * 同步绝不把钩子留成常驻；改变的只是「用户亲手点这一下时，愿不愿意短暂装一次」。
  */
 function syncAll(now) {
   return CreditStore.load().then(function (doc) {
@@ -1538,27 +1542,32 @@ function syncAll(now) {
     }
     return ids.reduce(function (chain, id) {
       return chain.then(function (acc) {
-        // 活体语义：直读平台先页面内请求一次；钩子还注册着的平台开隐藏页刷一份；
+        // 活体语义：直读平台先页面内请求一次；钩子还在的平台开页刷一份；
+        // 钩子已解除的平台临时装一次、读完立刻注销（不改变 hookActive）。
         // 刷不到（best-effort）就照旧用最近样本，结果里标 fresh=false 让 UI 说清楚。
-        // 解除钩子的平台不自动刷——那等于偷偷把钩子装回去，正是用户刚拆掉的东西。
         return CreditStore.load().then(function (d) {
           var adapter = CreditAdapters.get(id);
-          if (adapter && adapter.direct) {
-            return refreshCaptures(id, {}).then(function (r) {
-              return { fresh: !!r.fresh, direct: true, refreshError: r.ok ? null : (r.error || r.diagnosis || null) };
-            }, function (e) {
-              return { fresh: false, direct: true, refreshError: String((e && e.message) || e) };
-            });
-          }
-          if (d.agents[id] && d.agents[id].hookActive) {
-            return refreshCaptures(id, {}).then(function (r) { return { fresh: !!r.fresh }; },
-              function () { return { fresh: false }; });
-          }
-          return { fresh: null };   // null = 未装钩子，本次同步读的是既有样本
+          var isDirect = !!(adapter && adapter.direct);
+          var hookOn = !!(d.agents[id] && d.agents[id].hookActive);
+          var ephemeral = !isDirect && !hookOn;
+          return refreshCaptures(id, ephemeral ? { ephemeral: true } : {}).then(function (r) {
+            return {
+              fresh: !!(r && r.fresh),
+              direct: isDirect,
+              ephemeral: ephemeral,
+              refreshError: r && r.ok === false ? (r.error || r.diagnosis || null) : null
+            };
+          }, function (e) {
+            return {
+              fresh: false, direct: isDirect, ephemeral: ephemeral,
+              refreshError: String((e && e.message) || e)
+            };
+          });
         }).then(function (fr) {
           return syncOne(id, now).then(function (r) {
             r.fresh = fr.fresh;
             if (fr.direct) r.direct = true;
+            if (fr.ephemeral) r.ephemeral = true;
             if (fr.refreshError) r.refreshError = fr.refreshError;
             acc.results.push(r); return acc;
           });

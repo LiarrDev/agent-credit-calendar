@@ -654,7 +654,7 @@
                 : (authed ? " · 已授权 " + esc(a.origin) : "")
                   + (authed ? " · " + (a.hookActive
                       ? '<b style="color:#047857">钩子在（同步会实时读取）</b>'
-                      : '<b style="color:#b45309">钩子已解除（同步只读样本）</b>') : ""))
+                      : '<b style="color:#b45309">钩子已解除（同步时临时装一次，读完注销）</b>') : ""))
             + (direct ? "" : (a.lastError ? '<div class="hintline" style="color:#b91c1c">' + esc(a.lastError) + "</div>" : ""))
             + (direct ? "" : authStatusLine(a))
             + "</div></div>"
@@ -1221,6 +1221,7 @@
     var btn = this;
     if (!IS_EXT) { toast("预览模式不能抓取，请装成扩展后再同步"); return; }
     btn.disabled = true; btn.textContent = "同步中…";
+    toast("正在逐个平台抓活数据；没装常驻钩子的平台会临时装一次、读完立刻注销（可能要等一分钟）");
     chrome.runtime.sendMessage({ type: "SYNC" }, function (r) {
       btn.disabled = false; btn.textContent = "立即同步";
       if (r && r.ok) {
@@ -1242,12 +1243,19 @@
         var hooked = (r.results || []).filter(function (x) { return x.ok && x.fresh == null; });
         var directFresh = fresh.filter(function (x) { return x.direct; });
         var hookFresh = fresh.filter(function (x) { return !x.direct; });
+        var tempFresh = hookFresh.filter(function (x) { return x.ephemeral; });
+        var keptFresh = hookFresh.filter(function (x) { return !x.ephemeral; });
         if (directFresh.length) {
           toast("接口直读：" + directFresh.map(function (x) { return x.agentId; }).join("、")
             + "（在你的页面里请求了额度接口，不是旧样本）");
         }
-        if (hookFresh.length) {
-          toast("活体读取：" + hookFresh.map(function (x) { return x.agentId; }).join("、") + "（页面刚重新请求过）");
+        if (keptFresh.length) {
+          toast("活体读取：" + keptFresh.map(function (x) { return x.agentId; }).join("、") + "（页面刚重新请求过）");
+        }
+        if (tempFresh.length) {
+          // 钩子已解除的平台由同步临时装一次：必须说清楚，否则用户会以为扩展又偷偷常驻了。
+          toast("活体读取：" + tempFresh.map(function (x) { return x.agentId; }).join("、")
+            + "（临时装钩子，读完已注销）");
         }
         if (staleRefresh.length) {
           var errs = staleRefresh.map(function (x) { return x.refreshError; }).filter(Boolean);
@@ -1257,9 +1265,9 @@
             : "。后台页可能没登录，或用量接口没被触发"));
         }
         if (hooked.length) {
-          toast("这些平台没装钩子，读的是既有样本：" + hooked.map(function (x) {
+          toast("这些平台本次没有抓活数据，读的是既有样本：" + hooked.map(function (x) {
             return x.agentId + " " + hm(x.sampleAt);
-          }).join("、") + "。想更新就「粘贴样本」，或点「刷新余额」（临时装钩子）");
+          }).join("、") + "。可以点「刷新余额」单独重试");
         }
 
         if (r.message) toast("另有平台没同步成功：" + r.message);
