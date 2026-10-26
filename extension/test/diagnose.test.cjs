@@ -133,6 +133,37 @@ var fbAuth = D.of({
 has("代发失败：说出真实原因", fbAuth, "代发也失败");
 has("代发失败：401 的措辞直达登录", fbAuth, "没有登录态");
 
+/* ---------- 代发优先（v0.3.18） ---------- */
+/* WorkBuddy 的常规刷新现在是「隐藏页加载完直接代发」：代发不再是兜底而是主路径，
+ * 结论不能再挂「另外：…」的后缀；页面没登录（401）也要单独说，不能掉进
+ * 「页面一个接口响应都没发」的计数推断。 */
+var sentFirst = D.of({
+  hookAt: "x", relayAt: "x", responses: 3, candidates: 0, stored: 1, bestScore: 9,
+  hasHint: true, targetSeen: true, outcome: "hidden-send",
+  fallback: { ok: true, status: 200, bytes: 132867 }
+});
+has("代发优先成功：明说没等页面、直接代发", sentFirst, "没有等页面自己发请求");
+has("代发优先成功：带状态码与字节数", sentFirst, "HTTP 200，132867 字节");
+has("代发优先成功：说清存了几条", sentFirst, "1 条新样本");
+eq("代发优先成功：不再用「另外」的后缀措辞", /另外/.test(sentFirst), false);
+
+var sentDup = D.of({
+  hookAt: "x", relayAt: "x", responses: 2, candidates: 0, stored: 0, dups: 1,
+  outcome: "hidden-send", fallback: { ok: true, status: 200, bytes: 132867 }
+});
+has("代发优先但内容没变：说「余额确实没变」", sentDup, "余额确实没变");
+eq("代发优先但内容没变：不能说成「没读到」", /没读到/.test(sentDup), false);
+
+var sentAuth = D.of({
+  hookAt: "x", relayAt: "x", responses: 1, candidates: 0, stored: 0,
+  endpointStatus: 401, outcome: "auth",
+  fallback: { ok: false, status: 401, needLogin: true,
+    message: "接口返回 401：这个页面没有登录态。在该页面登录后再点「刷新余额」。" }
+});
+has("代发遇到 401：直接说没有登录态", sentAuth, "没有登录态");
+has("代发遇到 401：给出下一步（登录后再点）", sentAuth, "登录后再点");
+eq("代发遇到 401：不能掉进「页面没发响应」的推断", /响应都没发/.test(sentAuth), false);
+
 /* ---------- 诊断页标题的口径（v0.3.16） ---------- */
 /* v0.3.15 修掉了「代发成功、标题却写没读到」这一支，但 outcome:"error" 漏了：
  * 标题标绿写「读到了页面响应」，正文写「刷新流程本身出错了」。这类"同一屏两句话
@@ -159,6 +190,15 @@ eq("直读成功：标题算读到", vDirect.ok, true);
 var vDirectBad = D.verdict({ mode: "direct", outcome: "auth", httpStatus: 401 });
 eq("直读 401：标题是失败色", vDirectBad.ok, false);
 has("直读 401：标题不说读到", vDirectBad.text, "没读到");
+
+var vSent = D.verdict({ outcome: "hidden-send", fallback: { ok: true, status: 200 } });
+eq("代发优先成功：标题算读到", vSent.ok, true);
+has("代发优先成功：标题说明是后台页代发", vSent.text, "代发");
+
+var vSentAuth = D.verdict({ outcome: "auth", fallback: { ok: false, status: 401 } });
+eq("代发遇到 401：标题是失败色", vSentAuth.ok, false);
+has("代发遇到 401：标题点明未登录", vSentAuth.text, "未登录");
+eq("代发遇到 401：标题不说读到", /读到了页面响应/.test(vSentAuth.text), false);
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 if (fail) process.exitCode = 1;

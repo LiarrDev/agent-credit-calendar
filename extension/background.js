@@ -752,7 +752,7 @@ function refreshCaptures(agentId, opts) {
   if (cur && Date.now() - cur.at < REFRESH_LOCK_MS) {
     return Promise.resolve({
       ok: false, busy: true, agentId: agentId,
-      error: "上一次刷新还没结束（最多 32 秒），等它出结果再点一次"
+      error: "上一次刷新还没结束（最长约一分钟），等它出结果再点一次"
     });
   }
   // token 认身份：万一上一轮在超时之后才真正收尾，它不能把这一轮的锁删掉。
@@ -790,14 +790,47 @@ function doRefresh(agentId, opts) {
     return register(origin).then(function (info) {
       probe.worldAware = !!info.worldAware;
 
+      // v0.3.18：adapter 给了代发配方（readFallback）的平台（WorkBuddy）不再先等
+      // 页面自己发请求。决策 24 的探针已经证明：后台标签里这个 SPA 根本不发额度
+      // 接口，原「隐藏页 12s → 可见页 20s」的隐藏轮是必败的白等，用户看到的就是
+      // 「每次刷新都要开两次页面」。现在隐藏页一加载完就代发，成功路径只有一次
+      // 页面加载、不抢焦点；代发失败时才落回原有的可见页兜底。
+      var fallbackCfg = adapter && adapter.readFallback;
+      if (fallbackCfg) {
+        return sendFirst(agentId, fallbackCfg, a.consoleUrl, probe).then(function (r) {
+          if (r.fb && r.fb.ok) {
+            return settleSend(agentId, probe, r, "hidden-send", opts, origin, false);
+          }
+          // 401/403 = 页面没有登录态：标签页留着切到前台，登录后再点一次。
+          // 口径与直读的 auth 失败一致（failDirect）。
+          if (r.fb && r.fb.needLogin) {
+            return settleSend(agentId, probe, r, "auth", opts, origin, true);
+          }
+          // 其余失败（注入被挡 / 非 JSON / 接口侧错误）：页面自己的请求在可见页里
+          // 仍然可能成功，落回原有兜底。先把代发的回声窗口清掉——可见页里页面
+          // 自己发的同一个接口不能再被当成回声丢掉。
+          probe.selfUrl = null;
+          probe.selfAt = 0;
+          return closeQuietly(r.tabId).then(function () {
+            return attempt(agentId, a.consoleUrl, true, VISIBLE_WAIT_MS).then(function (r2) {
+              if (r2.seen) return settle(r2, "visible");
+              // 两轮都没等到：把可见页留着（settle 里按 both-failed 不关），
+              // 并在这个页面上下文里代发一次只读请求（adapter.readFallback）。
+              return settle(r2, "both-failed");
+            });
+          });
+        });
+      }
+
       return attempt(agentId, a.consoleUrl, false, SYNC_WAIT_MS).then(function (r1) {
         if (r1.seen) return settle(r1, "hidden");
-        // 隐藏页没等到 → 换可见页再试一次
-        return attempt(agentId, a.consoleUrl, true, VISIBLE_WAIT_MS).then(function (r2) {
-          if (r2.seen) return settle(r2, "visible");
-          // 两轮都没等到：把可见页留着（settle 里按 both-failed 不关），
-          // 并在这个页面上下文里代发一次只读请求（adapter.readFallback）。
-          return settle(r2, "both-failed");
+        // 隐藏页没等到 → 换可见页再试一次。先关掉隐藏页：以前这里不关，每次
+        // 刷新失败都留一个僵尸标签页在标签栏里越积越多。
+        return closeQuietly(r1.tabId).then(function () {
+          return attempt(agentId, a.consoleUrl, true, VISIBLE_WAIT_MS).then(function (r2) {
+            if (r2.seen) return settle(r2, "visible");
+            return settle(r2, "both-failed");
+          });
         });
       });
       function settle(r, mode) {
@@ -862,6 +895,80 @@ function doRefresh(agentId, opts) {
       // 顺手把真因记进探针，否则用户只看到「流程出错」四个字，等于没说。
       probe.error = String((e && e.message) || e);
       return endProbe(agentId, "error").then(function () { throw e; });
+    });
+  });
+}
+
+/**
+ * v0.3.18 代发优先：开一个隐藏标签页，等它加载完，立刻在页面上下文里代发一次
+ * 只读请求（adapter.readFallback）。与 attempt() 的区别是不等页面自己发请求——
+ * 真机上后台标签里等不到（决策 24 的探针证据）。返回 {fb, tabId, tabStatus, tabUrl}，
+ * 收尾交给 settleSend（成功 / 未登录）或落回可见页兜底（其余失败）。
+ */
+function sendFirst(agentId, cfg, consoleUrl, probe) {
+  return chrome.tabs.create({ url: cfg.pageUrl || consoleUrl, active: false }).then(function (tab) {
+    var t0 = Date.now();
+    return waitForTab(tab.id, DIRECT_WAIT_MS).then(function (info) {
+      function record(fb) {
+        probe.fallback = fb;
+        probe.attempts.push({ visible: false, seen: !!(fb && fb.ok),
+          tabStatus: info.status, tabUrl: info.url, ms: Date.now() - t0 });
+        return { fb: fb, tabId: tab.id, tabStatus: info.status, tabUrl: info.url };
+      }
+      return pageSend(agentId, cfg, tab.id, probe).then(record, function (e) {
+        return record({ ok: false, message: String((e && e.message) || e) });
+      });
+    });
+  });
+}
+
+/**
+ * 代发优先路径的收尾。needLogin=false：页面代发拿到了数据（含「内容没变」），
+ * 关页照常收尾；needLogin=true：页面没有登录态，标签页留着并切到前台，
+ * 口径与直读的 failDirect 一致——登录后再点一次「刷新余额」。
+ */
+function settleSend(agentId, probe, r, outcome, opts, origin, needLogin) {
+  var msg = null;
+  if (needLogin) {
+    msg = "页面没有登录态（接口返回 " + ((r.fb && r.fb.status) || "401/403")
+      + "）。已把页面切到前台，登录后再点「刷新余额」。";
+  }
+  var closeIt = needLogin ? Promise.resolve() : closeQuietly(r.tabId);
+  var bring = needLogin && r.tabId
+    ? chrome.tabs.update(r.tabId, { active: true }).catch(function () {})
+    : null;
+  return Promise.resolve(bring).then(function () { return closeIt; }).then(function () {
+    // 401 的状态是「目标接口回了什么」的硬证据，探针里单独留一笔供诊断页展示
+    if (needLogin && r.fb && r.fb.status) {
+      probe.endpointStatus = Number(r.fb.status);
+    }
+    var after = CreditStore.update(function (d) {
+      var a = d.agents[agentId];
+      if (!a) return;
+      a.hookActive = !opts.ephemeral;
+      if (msg) a.lastError = msg;
+    });
+    var unreg = opts.ephemeral ? unregister(origin) : Promise.resolve();
+    return unreg.then(function () { return after; }).then(function () {
+      return endProbe(agentId, outcome).then(function (p) {
+        var fb = (p && p.fallback) || null;
+        var fbOk = !!(fb && fb.ok);
+        var res = {
+          ok: fbOk, fresh: fbOk,
+          changed: fbOk && !!fb && !fb.duplicate,
+          upgraded: !!(fb && fb.upgraded),
+          mode: "hidden-send",
+          tabLeftOpen: !!needLogin, tabId: r.tabId,
+          ephemeral: !!opts.ephemeral,
+          fallback: fb,
+          probe: p,
+          diagnosis: diagnoseProbe(p)
+        };
+        if (needLogin) {
+          res.ok = false; res.fresh = false; res.needLogin = true; res.error = msg;
+        }
+        return res;
+      });
     });
   });
 }

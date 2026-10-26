@@ -62,6 +62,14 @@
         + "下面的计数只记录到一半，参考意义有限。";
     }
 
+    // v0.3.18：代发优先路径里页面没登录（代发返回 401/403），标签页已切到前台。
+    // 必须放在心跳/计数推断之前：登录页上钩子心跳和响应数什么都说明不了，
+    // 掉进下面的推断会说成「页面一个接口响应都没发」这种与事实不符的话。
+    if (p.outcome === "auth") {
+      return "接口返回 " + (p.endpointStatus || "401/403") + "：这个页面没有登录态。"
+        + "已把页面切到前台，登录后再点「刷新余额」。";
+    }
+
     if (!p.hookAt && !p.relayAt) {
       return "钩子根本没注入到这个页面（两个心跳都没收到）。可能是页面在注册之前就加载完了，或该浏览器挡住了 MAIN world 注入。";
     }
@@ -144,12 +152,15 @@
     // error = 流程本身崩了（注册脚本/开页失败），不是「平台没给数据」：
     // 它跟「两轮都没等到」一样属于失败，不能被当成读到了。
     var errored = !!(p && p.outcome === "error");
+    var notAuthed = !!(p && p.outcome === "auth");
     var bothFailed = !!(p && p.outcome === "both-failed");
+    var sentFirst = !!(p && p.outcome === "hidden-send");
     return {
-      ok: (!errored && !bothFailed) || fbOk,
+      ok: (!errored && !bothFailed && !notAuthed) || fbOk,
       text: errored ? "流程出错（不是平台没给数据）"
-        : !bothFailed ? "读到了页面响应"
-        : (fbOk ? "页面没发请求，代发读到了" : "没读到（隐藏页和可见页都试过了）")
+        : notAuthed ? "没读到数据（页面未登录）"
+        : bothFailed ? (fbOk ? "页面没发请求，代发读到了" : "没读到（隐藏页和可见页都试过了）")
+        : sentFirst ? "后台页代发读到了" : "读到了页面响应"
     };
   }
 
@@ -175,6 +186,16 @@
       if (p.stored > 0) return head + "存了 " + p.stored + " 条新样本 —— 数字已更新。";
       if (p.dups > 0) return head + "但响应内容和上次逐字节相同 —— 余额确实没变。";
       return head + "但没入库，原因未记录。";
+    }
+
+    // v0.3.18：代发优先平台的常规成功路径。不能再接「另外：…」的后缀——
+    // 这一次的数据就是代发拿的，它不是 supplementary 信息，是主结论。
+    if (fb && fb.ok && p.outcome === "hidden-send") {
+      var headSend = "没有等页面自己发请求：扩展在后台页面里直接代发了一次额度请求，"
+        + "HTTP " + (fb.status || "?") + "，" + (fb.bytes || 0) + " 字节。";
+      if (p.stored > 0) return headSend + "存了 " + p.stored + " 条新样本 —— 数字已更新。";
+      if (p.dups > 0) return headSend + "但响应内容和上次逐字节相同 —— 余额确实没变。";
+      return headSend + "但没入库，原因未记录。";
     }
 
     var text = core(p);

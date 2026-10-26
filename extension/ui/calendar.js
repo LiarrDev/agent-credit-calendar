@@ -1374,7 +1374,13 @@
         if (!r) { toast("后台没回话"); return; }
         if (r.busy) { toast(r.error || "上一次刷新还没结束"); return; }
         if (r.ok) {
-          if (r.fallback && r.fallback.ok) {
+          if (r.mode === "hidden-send" && r.fallback && r.fallback.ok) {
+            // v0.3.18：代发优先平台的常规成功路径——隐藏页里直接读，不等页面自己发。
+            // 必须说出来，不然用户会以为数字是从页面缓存里读的。
+            toast("已在后台页面里直接读取余额（HTTP " + r.fallback.status + "，"
+              + (r.fallback.bytes || 0) + " 字节"
+              + (r.fallback.duplicate ? "，和上次逐字节相同，数字没变" : "") + "）");
+          } else if (r.fallback && r.fallback.ok) {
             // v0.3.14：页面自己一次额度接口都没发，扩展在页面上下文里代发成功。
             // 这件事必须说出来——不然用户会以为数字是从页面缓存里读的。
             toast("页面这次没自己请求额度接口，扩展在你的页面里代发了一次（HTTP "
@@ -1427,7 +1433,7 @@
               + "。点「截获诊断」看完整记录");
           }
           if (r.tabLeftOpen) {
-            toast(isDirect
+            toast(isDirect || r.needLogin
               ? "登录页给你留在前台了：登录后回来再点「刷新余额」"
               : "那个标签页给你留着没关（钩子已注销），看一眼它是登录态还是空页面");
           }

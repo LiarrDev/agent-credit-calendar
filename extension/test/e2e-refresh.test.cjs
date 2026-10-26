@@ -49,7 +49,7 @@ var BODY = JSON.stringify({
 });
 
 /** 建一个带 mock chrome 的扩展环境，返回发消息与读存储的句柄。 */
-function createExt(dropOnChanged, fastWait) {
+function createExt(dropOnChanged, fastWait, scriptResults) {
   var mem = {}, onChanged = [], msgListeners = [], tabSeq = 1000;
   // 写存储的次数：service worker 每次唤醒都会整份 set() 一次的话，扩展页会被
   // onChanged 叫醒重画，正在填的补录表单就没了（见 background 的 retireQoderHook）。
@@ -101,7 +101,11 @@ function createExt(dropOnChanged, fastWait) {
       unregisterContentScripts: function () { return Promise.resolve(); },
       // v0.3.14 的代发兜底：真实环境是 chrome.scripting.executeScript 在页面里
       // 跑 directFetchInPage；这里直接回一份和站点一致的 200 响应。
+      // v0.3.18 起支持排队：scriptResults 里的结果先出（测代发失败→兜底），用完回落默认。
       executeScript: function (opts) {
+        if (sandbox.__scriptResults && sandbox.__scriptResults.length) {
+          return Promise.resolve([{ result: sandbox.__scriptResults.shift() }]);
+        }
         if (sandbox.__scriptResult) return Promise.resolve([{ result: sandbox.__scriptResult }]);
         return Promise.resolve([{ result: {
           ok: true, status: 200, finalUrl: API,
@@ -111,9 +115,18 @@ function createExt(dropOnChanged, fastWait) {
       }
     },
     tabs: {
-      create: function (o) { tabSeq++; return Promise.resolve({ id: tabSeq, url: o.url, active: !!o.active }); },
+      created: [], removed: [], fg: 0,
+      create: function (o) {
+        tabSeq++;
+        chrome.tabs.created.push({ id: tabSeq, active: !!o.active, url: o.url });
+        return Promise.resolve({ id: tabSeq, url: o.url, active: !!o.active });
+      },
       get: function (id) { return Promise.resolve({ id: id, status: "complete", url: PAGE }); },
-      remove: function () { return Promise.resolve(); }
+      remove: function (id) { chrome.tabs.removed.push(id); return Promise.resolve(); },
+      update: function (id, props) {
+        if (props && props.active) chrome.tabs.fg++;
+        return Promise.resolve({ id: id, active: !!(props && props.active) });
+      }
     }
   };
 
@@ -125,6 +138,7 @@ function createExt(dropOnChanged, fastWait) {
     URL: URL, URLSearchParams: URLSearchParams
   };
   var ctx = vm.createContext(sandbox);
+  sandbox.__scriptResults = (scriptResults || []).slice();
   sandbox.importScripts = function () {
     for (var i = 0; i < arguments.length; i++) {
       var f = arguments[i];
@@ -163,12 +177,12 @@ function createExt(dropOnChanged, fastWait) {
     return handled;
   }
 
-  return { mem: mem, send: send, sender: sender, ctx: ctx, writes: function () { return writes; } };
+  return { mem: mem, send: send, sender: sender, ctx: ctx, tabs: chrome.tabs, writes: function () { return writes; } };
 }
 
 /** 走一次完整刷新，返回结果与耗时。 */
-function runRefresh(dropOnChanged, fastWait) {
-  var ext = createExt(dropOnChanged, fastWait);
+function runRefresh(dropOnChanged, fastWait, scriptResults) {
+  var ext = createExt(dropOnChanged, fastWait, scriptResults);
   var s = ext.sender;
 
   return new Promise(function (resolve) {
@@ -176,7 +190,7 @@ function runRefresh(dropOnChanged, fastWait) {
 
     ext.send({ type: "REFRESH_CAPTURES", agentId: "workbuddy", ephemeral: false }, function (r) {
       result = r;
-      resolve({ r: r, ms: Date.now() - t0, mem: ext.mem });
+      resolve({ r: r, ms: Date.now() - t0, mem: ext.mem, ext: ext });
     });
 
     if (fastWait) {
@@ -211,47 +225,74 @@ function runRefresh(dropOnChanged, fastWait) {
 }
 
 (function main() {
+  // v0.3.18 代发优先：WorkBuddy 的常规路径不再等页面自己发请求。场景 1/2 要继续
+  // 覆盖 waitForCapture 的事件驱动行为，所以让隐藏页的代发先失败（注入被挡），
+  // 流程落到可见页兜底，页面自己的 CAPTURED 在可见轮被等到。
+  var SEND_FAIL = { ok: false, error: "注入被挡" };
+
   console.log("--- 场景 1：storage.onChanged 正常派发");
-  runRefresh(false).then(function (a) {
+  runRefresh(false, false, [SEND_FAIL]).then(function (a) {
     ok("事件驱动：刷新成功", a.r && a.r.ok === true, a.r);
     ok("事件驱动：抓到新内容", !!(a.r && a.r.changed), a.r && a.r.changed);
     ok("事件驱动：日历写入 3 笔批次",
       (a.mem[KEY].batches || []).length === 3, (a.mem[KEY].batches || []).length);
     ok("事件驱动：秒回（<5s，说明走的是事件而不是轮询）", a.ms < 5000, a.ms);
+    ok("事件驱动：先开隐藏页（代发失败），再开可见页等截获",
+      a.ext.tabs.created.length === 2 &&
+        a.ext.tabs.created[0].active === false && a.ext.tabs.created[1].active === true,
+      a.ext.tabs.created);
+    ok("事件驱动：两个标签页都已关闭（v0.3.18 修僵尸页，旧实现隐藏页不关）",
+      a.ext.tabs.removed.length === 2 &&
+        a.ext.tabs.removed.indexOf(a.ext.tabs.created[0].id) >= 0 &&
+        a.ext.tabs.removed.indexOf(a.ext.tabs.created[1].id) >= 0,
+      a.ext.tabs.removed);
 
     console.log("--- 场景 2：storage.onChanged 不派发（v0.3.10 的回归点）");
-    return runRefresh(true);
+    return runRefresh(true, false, [SEND_FAIL]);
   }).then(function (b) {
     ok("兜底复查：事件没派发也要刷新成功", b.r && b.r.ok === true, b.r);
     ok("兜底复查：日历仍然写入 3 笔批次",
       (b.mem[KEY].batches || []).length === 3, (b.mem[KEY].batches || []).length);
     ok("兜底复查：没退化成干等超时（<10s）", b.ms < 10000, b.ms);
 
-    console.log("--- 场景 3：页面加载完但一次额度接口都不请求（v0.3.14 代发兜底）");
+    console.log("--- 场景 3：代发优先——页面不发请求也一次读成（v0.3.18）");
     return runRefresh(false, true);
   }).then(function (c) {
-    ok("代发兜底：刷新仍然成功", c.r && c.r.ok === true, c.r);
-    ok("代发兜底：结果里带 fallback 记录", !!(c.r && c.r.fallback && c.r.fallback.ok), c.r && c.r.fallback);
-    ok("代发兜底：日历写入 3 笔批次",
+    ok("代发优先：刷新成功", c.r && c.r.ok === true, c.r);
+    ok("代发优先：结果里带 fallback 记录", !!(c.r && c.r.fallback && c.r.fallback.ok), c.r && c.r.fallback);
+    ok("代发优先：日历写入 3 笔批次",
       (c.mem[KEY].batches || []).length === 3, (c.mem[KEY].batches || []).length);
-    ok("代发兜底：诊断说清「页面没发、扩展代发」",
+    ok("代发优先：诊断说清「没等页面、直接代发」",
       /代发/.test(String(c.r && c.r.diagnosis)), c.r && c.r.diagnosis);
-    ok("代发兜底：探针把 fallback 落库（诊断页能看到）",
+    ok("代发优先：探针把 fallback 落库（诊断页能看到）",
       !!(c.mem[KEY].agents.workbuddy.probe && c.mem[KEY].agents.workbuddy.probe.fallback),
       c.mem[KEY].agents.workbuddy.probe && c.mem[KEY].agents.workbuddy.probe.fallback);
     // v0.3.15：pageSend 必须把探测句柄传进 storeCapture，否则真正入库的那条不计数，
     // 探针会显示「0 条新样本 / 1 条内容相同」——真机 09:29 那次的假结论就是这么来的。
-    ok("代发兜底：探针记到 1 条新样本",
+    ok("代发优先：探针记到 1 条新样本",
       c.mem[KEY].agents.workbuddy.probe.stored === 1,
       c.mem[KEY].agents.workbuddy.probe.stored);
-    ok("代发兜底：没有被误记成重复",
+    ok("代发优先：没有被误记成重复",
       c.mem[KEY].agents.workbuddy.probe.dups === 0,
       c.mem[KEY].agents.workbuddy.probe.dups);
-    ok("代发兜底：诊断说的是「存了新样本」而不是「逐字节相同」",
+    ok("代发优先：诊断说的是「存了新样本」而不是「逐字节相同」",
       /1 条新样本/.test(String(c.r && c.r.diagnosis))
         && !/逐字节相同/.test(String(c.r && c.r.diagnosis)),
       c.r && c.r.diagnosis);
+    ok("代发优先：outcome 记为 hidden-send",
+      c.mem[KEY].agents.workbuddy.probe.outcome === "hidden-send",
+      c.mem[KEY].agents.workbuddy.probe && c.mem[KEY].agents.workbuddy.probe.outcome);
+    ok("代发优先：只开过一次页面（隐藏页）且已关闭，不抢焦点",
+      c.ext.tabs.created.length === 1 && c.ext.tabs.created[0].active === false
+        && c.ext.tabs.removed.length === 1,
+      { created: c.ext.tabs.created, removed: c.ext.tabs.removed });
 
+    console.log("--- 场景 3b：页面没登录（代发返回 401）→ 保页切前台");
+    return needLoginChecks();
+  }).then(function () {
+    console.log("--- 场景 3c：隐藏代发失败 → 可见页兜底（老链路保留）");
+    return bothFailedFallbackChecks();
+  }).then(function () {
     console.log("--- 场景 4：代发请求被自己的钩子截到（回声）");
     return echoChecks();
   }).then(function () {
@@ -341,6 +382,69 @@ function concurrentChecks() {
         }
       });
     }, 300);
+  });
+}
+
+/**
+ * 场景 3b：代发返回 401 = 页面没有登录态。标签页必须留着并切到前台
+ * （口径与直读的 failDirect 一致），诊断直接说没登录，不能掉进
+ * 「页面一个接口响应都没发」的计数推断；批次一个都不能写。
+ */
+function needLoginChecks() {
+  var FAIL401 = {
+    ok: true, status: 401, finalUrl: API, contentType: "application/json",
+    body: JSON.stringify({ code: 401, msg: "unauthorized" }),
+    bodyBytes: 34, truncated: false, tokenFound: true
+  };
+  var ext = createExt(false, true, [FAIL401]);
+  return new Promise(function (resolve) {
+    ext.send({ type: "REFRESH_CAPTURES", agentId: "workbuddy", ephemeral: false }, function (r) {
+      resolve({ r: r, mem: ext.mem, tabs: ext.tabs, ctx: ext.ctx });
+    });
+  }).then(function (o) {
+    var probe = o.mem[KEY].agents.workbuddy.probe;
+    ok("未登录：刷新失败", !!(o.r && o.r.ok === false), o.r);
+    ok("未登录：结果标 needLogin 且标签页留着",
+      !!(o.r && o.r.needLogin === true && o.r.tabLeftOpen === true), o.r);
+    ok("未登录：标签页没有被关掉", o.tabs.removed.length === 0, o.tabs.removed);
+    ok("未登录：页面被切到前台", o.tabs.fg === 1, o.tabs.fg);
+    ok("未登录：探针 outcome 记为 auth", !!(probe && probe.outcome === "auth"),
+      probe && probe.outcome);
+    ok("未登录：诊断直接说没有登录态并给出下一步",
+      /没有登录态/.test(String(o.r && o.r.diagnosis)) && /登录后再点/.test(String(o.r && o.r.diagnosis)),
+      o.r && o.r.diagnosis);
+    var v = o.ctx.CreditDiagnose.verdict(probe);
+    ok("未登录：标题判定为失败（不说读到）", !!(v && v.ok === false), v);
+    ok("未登录：lastError 写入面板",
+      /没有登录态/.test(String(o.mem[KEY].agents.workbuddy.lastError || "")),
+      o.mem[KEY].agents.workbuddy.lastError);
+    ok("未登录：绝不写空批次", (o.mem[KEY].batches || []).length === 0, o.mem[KEY].batches);
+  });
+}
+
+/**
+ * 场景 3c：隐藏页代发失败（接口侧错误）时，老的两轮兜底必须还在：
+ * 可见页等页面自己发 → 等不到就在可见页里再代发一次（both-failed，决策 24）。
+ * 隐藏页要被关掉，成功后代发所在的可见页也要关掉。
+ */
+function bothFailedFallbackChecks() {
+  var ext = createExt(false, true, [{ ok: false, error: "接口侧错误" }]);
+  return new Promise(function (resolve) {
+    ext.send({ type: "REFRESH_CAPTURES", agentId: "workbuddy", ephemeral: false }, function (r) {
+      resolve({ r: r, mem: ext.mem, tabs: ext.tabs });
+    });
+  }).then(function (o) {
+    ok("兜底代发：隐藏代发失败后，可见页代发成功",
+      !!(o.r && o.r.ok && o.r.fallback && o.r.fallback.ok), o.r);
+    ok("兜底代发：outcome 仍是 both-failed",
+      o.mem[KEY].agents.workbuddy.probe.outcome === "both-failed",
+      o.mem[KEY].agents.workbuddy.probe && o.mem[KEY].agents.workbuddy.probe.outcome);
+    ok("兜底代发：批次写入 3 笔",
+      (o.mem[KEY].batches || []).length === 3, (o.mem[KEY].batches || []).length);
+    ok("兜底代发：诊断接上代发结果", /代发/.test(String(o.r && o.r.diagnosis)), o.r && o.r.diagnosis);
+    ok("兜底代发：两个标签页都已关闭",
+      o.tabs.created.length === 2 && o.tabs.removed.length === 2,
+      { created: o.tabs.created.length, removed: o.tabs.removed.length });
   });
 }
 
