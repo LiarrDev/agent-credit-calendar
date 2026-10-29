@@ -74,7 +74,7 @@
   .dow{display:grid;grid-template-columns:repeat(7,1fr);padding:8px 8px 4px;font-size:11px;color:var(--ink-3);text-align:center}
   .dow i{font-style:normal}
   .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line-2);padding:0 8px 8px}
-  .cell{background:#fff;min-height:96px;padding:5px 6px;position:relative;cursor:pointer;transition:background .12s}
+  .cell{background:#fff;min-height:122px;padding:5px 6px;position:relative;cursor:pointer;transition:background .12s}
   .cell:hover{background:#fbfcfe}
   .cell.out{background:#fcfcfd;cursor:default}
   .cell.we{background:#fbfbfd}

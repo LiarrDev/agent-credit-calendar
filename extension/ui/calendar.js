@@ -321,7 +321,7 @@
         g.expired = g.expired && isExpired(b);
       });
       groups.sort(function (a, c) { return c.remaining - a.remaining; });
-      var shown = groups.slice(0, 3);
+      var shown = groups.slice(0, 4);
       var html = '<div class="' + cls + '" data-day="' + ds + '"><div class="dnum">'
         + (d.getTime() === todayTs ? '<span class="td">今天</span>' : "")
         + '<span style="' + (d.getDate() === 1 ? "font-weight:650;color:var(--ink)" : "") + '">'
@@ -333,7 +333,7 @@
             + '" data-agent="' + esc(g.agent) + '" title="' + name + " · " + g.count + ' 笔，点击查看当日明细"><b>'
             + name + "</b> " + chipAmt(g) + "</div>";
         }).join("")
-          + (groups.length > 3 ? '<div class="more">+' + (groups.length - 3) + " 个平台，点开看</div>" : "")
+          + (groups.length > 4 ? '<div class="more">+' + (groups.length - 4) + " 个平台，点开看</div>" : "")
           + "</div>";
       }
       return html + "</div>";

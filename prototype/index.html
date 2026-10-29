@@ -80,7 +80,7 @@
   .dow{display:grid;grid-template-columns:repeat(7,1fr);padding:8px 8px 4px;font-size:11px;color:var(--ink-3);text-align:center}
   .dow i{font-style:normal}
   .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line-2);padding:0 8px 8px}
-  .cell{background:#fff;min-height:96px;padding:5px 6px;position:relative;cursor:pointer;transition:background .12s}
+  .cell{background:#fff;min-height:122px;padding:5px 6px;position:relative;cursor:pointer;transition:background .12s}
   .cell:hover{background:#fbfcfe}
   .cell.out{background:#fcfcfd;cursor:default}
   .cell.we{background:#fbfbfd}
@@ -388,7 +388,7 @@
               + ((d.getDay()===0||d.getDay()===6)?" we":"")
               + (d.getTime()===selTs?" sel":"");
       var items = out ? [] : expiringOn(ds);
-      var shown = items.slice(0,3);
+      var shown = items.slice(0,4);
       var html = '<div class="'+cls+'" data-day="'+ds+'">'
         + '<div class="dnum">'+(d.getTime()===todayTs?'<span class="td">今天</span>':'')
         + '<span style="'+(d.getDate()===1?"font-weight:650;color:var(--ink)":"")+'">'+d.getDate()+'</span></div>';
@@ -396,7 +396,7 @@
         html += '<div class="entries">'+shown.map(function(b){
           return '<div class="e'+(past?" dim":"")+'" style="--c:var(--'+b.agent+')" data-bid="'+b.batchId+'" title="'+esc(b.label)+'">'+
                  '<b>'+AG[b.agent].name+'</b> '+chipAmt(b)+'</div>';
-        }).join("") + (items.length>3?'<div class="more">+'+(items.length-3)+' 笔，点开看</div>':'') + '</div>';
+        }).join("") + (items.length>4?'<div class="more">+'+(items.length-4)+' 笔，点开看</div>':'') + '</div>';
       }
       return html + '</div>';
     }).join("");

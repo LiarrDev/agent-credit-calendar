@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Agent 积分过期日历",
-  "version": "0.3.20",
+  "version": "0.3.21",
   "description": "在月历上查看各 AI Agent 积分的到期日与当前余额（Qoder / TRAE / WorkBuddy / LobsterAI）。Qoder 页面内直读，其余三家授权截获；全程只读。",
   "permissions": [
     "storage",
