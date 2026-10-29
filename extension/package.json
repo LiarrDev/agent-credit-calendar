@@ -1,6 +1,6 @@
 {
   "name": "agent-credit-calendar-extension",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "private": true,
   "description": "Agent 积分过期日历 —— Chrome MV3 扩展。无构建步骤，浏览器直接装载 extension/ 目录。存在只为 npm test。",
   "scripts": {

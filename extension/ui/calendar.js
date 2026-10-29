@@ -126,6 +126,10 @@
 
   function ORDER() { return AG.AGENTS.map(function (a) { return a.id; }); }
   function colorOf(id) { var a = AG.byId(id); return a ? a.color : "#888"; }
+  function openConsole(id) {
+    var a = AG.byId(id);
+    if (a && a.consoleUrl) window.open(a.consoleUrl, "_blank", "noopener");
+  }
   function isExpired(b) { return N.statusOf(b.expiresAt, new Date(), b.resetInstant) === "expired"; }
   /* 平台已经不再返回的批次（只有 authoritative 平台会标）：历史留着备查，
    * 但一分钱都不该计入余额、日历和「即将到期」——它已经不在后台了，
@@ -237,7 +241,8 @@
         cd = '<span class="cd ' + k + '">' + (d === 0 ? "今天到期" : "还有 " + d + " 天") + "</span>";
       }
       return '<div class="card" style="--c:' + colorOf(s.agent) + '">'
-        + '<div class="card-head"><span class="agent-name">' + esc(s.name) + "</span>"
+        + '<div class="card-head"><span class="agent-name" data-act="console" data-agent="' + s.agent + '" title="打开 ' + esc(s.name) + ' 后台">'
+          + esc(s.name) + '<span class="ext" aria-hidden="true">↗</span></span>'
         + '<span class="chip ' + m[1] + '">' + m[0] + "</span></div>"
         + (s.count
           ? '<div class="balance">' + fmt(s.unit, s.total) + '<span class="u">' + unitLabel(s.unit) + " 可用</span></div>"
@@ -1122,6 +1127,8 @@
   /* ---------- 事件 ---------- */
 
   $("#cards").addEventListener("click", function (e) {
+    var cn = e.target.closest('[data-act="console"]');
+    if (cn) { openConsole(cn.getAttribute("data-agent")); return; }
     var w = e.target.closest('[data-act="wasted"]');
     if (w) { wasted = w.getAttribute("data-agent"); edit = null; adding = false; sel = null; persist(); render(); return; }
     var g = e.target.closest('[data-act="closed"]');
