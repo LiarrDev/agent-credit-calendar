@@ -18,11 +18,10 @@
  * 映射规则（每条都对应样本里看得到的事实）：
  *   - 只认 data.creditItems。totalCreditsRemaining 是明细的合计，取它会把同一笔钱算两遍。
  *   - expiresAt 是清零时刻，形如 "2026-10-24T10:30:05"，没有时区后缀（服务端本地时间）。
- *     不传 semantics，交给 normalize 按 resetsAt 处理：减一天得到"最后可用日"，
- *     精确时刻留在 resetInstant 里由 UI 单独说明。
+ *     交给 normalize 取本地到期日期，精确时刻留在 resetInstant。
  *   - 接口只给剩余量、不给原始发放量。granted 暂用 creditsRemaining 填，至少编辑框里不是 0；
  *     这个值会随消耗一起下降，它不是真正的 grant，UI 和汇总都只看 remaining。
- *   - "每日登录奖励"会同时存在十几笔，label 完全相同。label 末尾带上最后可用日的 MM-DD，
+ *   - "每日登录奖励"会同时存在十几笔，label 完全相同。label 末尾带上到期日期的 MM-DD，
  *     否则 ① 明细里十几行同名无法分辨；② 某一笔被手改后，mergeBatches 的冻结兜底按
  *     (agent+label) 匹配，会把抓取值挂到同名的另一笔上。日期取自 normalize 的换算结果，
  *     与列表显示的到期日一致；只要服务端不改变某笔的 expiresAt，label 就是稳定的。
@@ -46,7 +45,7 @@
   function labelFor(item) {
     var name = item.label || item.labelEn || item.type || "额度";
     // N 在真实加载路径上一定存在（background 先 import normalize；runSync 也会检查）。
-    // 用它的换算结果而不是自己减一天，保证 label 里的日期和列表里的到期日永远一致。
+    // 共用日期换算，保证 label 后缀与列表到期日一致。
     var day = N && N.daySuffix ? N.daySuffix(item.expiresAt) : null;
     return name + (day ? " " + day : "");
   }

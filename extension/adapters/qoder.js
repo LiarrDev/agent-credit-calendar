@@ -23,8 +23,7 @@
  *     编一个比不显示更糟，所以跳过；哪天主额度有了非零金额，需要给模型加"无到期批次"
  *     的表示法，再回来改这里。
  *   - limit_value === 0 的不算批次（没发过东西）。
- *   - expires_at 是毫秒时间戳，按"清零时刻"理解：直接把数字交给 normalizeBatch，
- *     统一规则会减一天得到"最后可用日"（宁可少标一天，见 normalize.js 的 fromInstant）。
+ *   - expires_at 是毫秒时间戳，交给 normalizeBatch 取本地到期日期，保留精确时刻。
  *   - label = source + " #" + id 末四位。source 会大批重复（全是
  *     RESOURCE_PACKAGE_SOURCE_BONUS），id 才是服务端给每批的稳定标识；
  *     label 里**不放到期日**——冻结批次靠 (agent+label) 兜底匹配，放了就会失配冒重复。

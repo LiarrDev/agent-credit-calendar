@@ -12,14 +12,14 @@ function eq(label, got, want) {
 eq("纯日期视为最后可用日",
   N.toExpiresAt("2026-10-31").expiresAt, "2026-10-31");
 
-eq("resets on Nov 1 -> 最后可用日是 10-31（差一天的坑）",
-  N.toExpiresAt("resets on Nov 1, 2026").expiresAt, "2026-10-31");
+eq("resets on Nov 1 保留实际日期 11-01",
+  N.toExpiresAt("resets on Nov 1, 2026").expiresAt, "2026-11-01");
 
 eq("valid until Oct 31 -> 10-31",
   N.toExpiresAt("valid until Oct 31, 2026").expiresAt, "2026-10-31");
 
 eq("带时刻的 ISO 按清零时刻处理",
-  N.toExpiresAt("2026-11-01T09:00").expiresAt, "2026-10-31");
+  N.toExpiresAt("2026-11-01T09:00").expiresAt, "2026-11-01");
 
 eq("显式声明 lastUsableDay 可覆盖时刻推断",
   N.toExpiresAt("2026-11-01T00:00", "lastUsableDay").expiresAt, "2026-11-01");
@@ -27,11 +27,11 @@ eq("显式声明 lastUsableDay 可覆盖时刻推断",
 eq("缺年份用 yearHint 补",
   N.toExpiresAt("valid until Dec 20", "lastUsableDay", 2026).expiresAt, "2026-12-20");
 
-eq("毫秒时间戳按清零时刻处理，最后可用日是前一天",
-  N.toExpiresAt(new Date(2026, 9, 31, 0, 0).getTime()).expiresAt, "2026-10-30");
+eq("毫秒时间戳零点到期保留当日",
+  N.toExpiresAt(new Date(2026, 9, 31, 0, 0).getTime()).expiresAt, "2026-10-31");
 
-eq("当天 09:00 清零也不把那天算成可用日（宁可少标一天）",
-  N.toExpiresAt("2026-11-01T09:00").expiresAt, "2026-10-31");
+eq("当天 09:00 到期不再提前一天",
+  N.toExpiresAt("2026-11-01T09:00").expiresAt, "2026-11-01");
 
 eq("清零时刻被保留，供 UI 精确说明",
   N.toExpiresAt("resets on Nov 1, 2026").resetInstant !== null, true);
@@ -72,11 +72,11 @@ var nb = N.normalizeBatch({
 }, { now: today });
 eq("千分位字符串转数字", nb.remaining, 4200);
 eq("granted 千分位", nb.granted, 30000);
-eq("归一化后 expiresAt", nb.expiresAt, "2026-10-31");
+eq("归一化后 expiresAt", nb.expiresAt, "2026-11-01");
 eq("默认单位 credits", nb.unit, "credits");
 eq("batchId 稳定", nb.batchId, N.normalizeBatch({
   agent: "trae", label: "Monthly Speed Points", granted: 30000, remaining: 4200,
-  expiry: "2026-10-31" }, { now: today }).batchId);
+  expiry: "2026-11-01" }, { now: today }).batchId);
 
 /* ---------- merge：三种关键情形 ---------- */
 function mk(o) {
@@ -208,7 +208,7 @@ eq("只差末尾字符的 id 短码不同（截断后撞码的坑）",
   N.stableTag("resource-id-0001") !== N.stableTag("resource-id-0002"), true);
 
 /* ---------- 到期日后缀 ---------- */
-eq("daySuffix 取 MM-DD", N.daySuffix("2026-11-01T09:00"), "10-31");
+eq("daySuffix 取实际日期 MM-DD", N.daySuffix("2026-11-01T09:00"), "11-01");
 eq("daySuffix 说明语义后不减一天", N.daySuffix("2026-11-01T09:00", "lastUsableDay"), "11-01");
 eq("daySuffix 解析不了返回 null", N.daySuffix("不是日期"), null);
 
@@ -320,6 +320,43 @@ var manyCaps = N.importSnapshot({ captures: new Array(80).fill(0).map(function (
 }) }, { agents: ["qoder"] });
 eq("导入：样本上限 60 条", manyCaps.captures.length, 60);
 eq("导入：超上限时留高分的那批", manyCaps.captures[0].score, 79);
+
+var timed = N.normalizeBatch({ agent: "qoder", label: "精确时间", granted: 100, remaining: 80,
+  expiry: "2026-11-01T09:05:30.123" });
+eq("列表完整日期和时分", N.formatExpiry(timed), "2026-11-01 09:05");
+eq("到期前 1 毫秒仍有效", N.statusOf(timed.expiresAt, new Date(2026, 10, 1, 9, 5, 30, 122), timed.resetInstant), "active");
+eq("到期那一毫秒即过期", N.statusOf(timed.expiresAt, new Date(2026, 10, 1, 9, 5, 30, 123), timed.resetInstant), "expired");
+eq("到期当日下午已过期", N.statusOf(timed.expiresAt, new Date(2026, 10, 1, 12), timed.resetInstant), "expired");
+eq("午夜到期不减日期", N.toExpiresAt("2026-11-01T00:00").expiresAt, "2026-11-01");
+eq("午夜到期当天零点即过期", N.statusOf("2026-11-01", new Date(2026, 10, 1),
+  new Date(2026, 10, 1).toISOString()), "expired");
+eq("未知时间不伪造午夜", N.formatExpiry({ expiresAt: "2026-11-01" }), "2026-11-01（具体时间未知）");
+eq("只有日期时全天有效", N.statusOf("2026-11-01", new Date(2026, 10, 1, 23, 59, 59)), "active");
+eq("只有日期时次日过期", N.statusOf("2026-11-01", new Date(2026, 10, 2)), "expired");
+eq("非法原始时间不显示 NaN", N.formatExpiry({ expiresAt: "2026-11-01", resetInstant: "bad" }), "2026-11-01（具体时间未知）");
+eq("无效 Date 不抛错", N.toExpiresAt(new Date(NaN)), null);
+eq("超范围毫秒不抛错", N.toExpiresAt(1e20), null);
+eq("数字显式日期语义不编造时分", N.toExpiresAt(new Date(2026, 10, 1).getTime(), "lastUsableDay").resetInstant, null);
+eq("Date 显式日期语义不编造时分", N.toExpiresAt(new Date(2026, 10, 1), "lastUsableDay").resetInstant, null);
+
+var editedTime = N.applyManualEdit(timed, { expiresAt: "2026-11-03" });
+eq("手改日期不显示旧时分", N.formatExpiry(editedTime), "2026-11-03（具体时间未知）");
+eq("手改日期不被旧时刻提前判过期", N.statusOf(editedTime.expiresAt, new Date(2026, 10, 2), editedTime.resetInstant), "active");
+eq("仅手改余额保留时间", N.formatExpiry(N.applyManualEdit(timed, { remaining: 50 })), "2026-11-01 09:05");
+
+var later = Object.assign({}, timed, { resetInstant: new Date(2026, 10, 1, 10, 30).toISOString() });
+var timeMerged = N.mergeBatches([timed], [later], { now: new Date(2026, 10, 1, 9, 30) });
+eq("同日仅时分变更也更新", timeMerged.updated, 1);
+eq("同日时分变更不新增批次", timeMerged.added, 0);
+eq("同步时刻变更后展示新时间", N.formatExpiry(timeMerged.batches[0]), "2026-11-01 10:30");
+eq("同步时刻变更后仍有效", timeMerged.batches[0].status, "active");
+eq("无数字变化也更新过期状态", N.mergeBatches([later], [later], {
+  now: new Date(2026, 10, 1, 10, 30) }).batches[0].status, "expired");
+var timeConflict = N.mergeBatches([N.applyManualEdit(timed, { remaining: 80 })], [later], {
+  now: new Date(2026, 10, 1, 9, 30) });
+eq("冻结批次时刻变更进入冲突", timeConflict.conflicts, 1);
+eq("冲突保留新时刻", timeConflict.batches[0].scraped.resetInstant, later.resetInstant);
+eq("采纳冲突后显示新时刻", N.formatExpiry(N.acceptScraped(timeConflict.batches[0])), "2026-11-01 10:30");
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

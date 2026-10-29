@@ -16,9 +16,9 @@ function eq(l, g, w) {
   if (a === b) pass++; else { fail++; console.log("FAIL  " + l + "\n      got  " + a + "\n      want " + b); }
 }
 
-var T1 = Date.UTC(2026, 10, 20, 2, 0, 0);   // 2026-11-20T02:00Z -> 最后可用日 11-19
-var T2 = Date.UTC(2026, 9, 23, 1, 52, 0);   // 2026-10-23T01:52Z -> 10-22
-var T3 = Date.UTC(2026, 9, 22, 0, 0, 0);    // 2026-10-22T00:00Z -> 10-21
+var T1 = Date.UTC(2026, 10, 20, 2, 0, 0);   // 2026-11-20T02:00Z
+var T2 = Date.UTC(2026, 9, 23, 1, 52, 0);   // 2026-10-23T01:52Z
+var T3 = Date.UTC(2026, 9, 22, 0, 0, 0);    // 2026-10-22T00:00Z
 
 function entry(id, limit, used, remaining, expires, source) {
   return { id: id, limit_value: limit, used_value: used, remaining_value: remaining,
@@ -100,10 +100,12 @@ eq("granted/remaining 照抄 limit/remaining", rows.map(function (r) { return [r
 var now = new Date(2026, 9, 21);
 var res = D.runSync("qoder", [capture], now);
 eq("runSync 走通", res.ok, true);
-eq("清零时刻减一天成最后可用日", res.batches.map(function (b) { return b.expiresAt; }),
-  ["2026-11-19", "2026-10-22", "2026-10-21"]);
+eq("毫秒时间戳取本地实际到期日期", res.batches.map(function (b) { return b.expiresAt; }),
+  ["2026-11-20", "2026-10-23", "2026-10-22"]);
 eq("resetInstant 保留精确时刻", res.batches[0].resetInstant, new Date(T1).toISOString());
-eq("今天到期的批次算 active 不算 expired", res.batches[2].status, "active");
+eq("尚未到达清零时刻的批次算 active", res.batches[2].status, "active");
+eq("零点到期前仍有效", D.runSync("qoder", [capture], new Date(T3 - 1)).batches[2].status, "active");
+eq("零点到期即失效", D.runSync("qoder", [capture], new Date(T3)).batches[2].status, "expired");
 eq("dedupKey 互不相同", (function () {
   var ks = res.batches.map(function (b) { return N.dedupKey(b); });
   return new Set(ks).size;

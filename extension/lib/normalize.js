@@ -38,40 +38,44 @@
 
   function addDays(d, n) { return startOfDay(new Date(d.getTime() + n * MS_DAY)); }
 
-  /** 距今剩余天数。expiresAt 是"最后一个可用日"，所以今天到期 = 0。 */
   function daysLeft(expiresAt, today) {
     var e = parseYmd(expiresAt), t = today || startOfDay(new Date());
     if (!e) return null;
     return Math.round((e.getTime() - startOfDay(t).getTime()) / MS_DAY);
   }
 
-  function statusOf(expiresAt, now) {
+  function expiryInstant(batch) {
+    if (!batch.resetInstant) return null;
+    var d = new Date(batch.resetInstant);
+    // 手改日期后，原始时刻只留作来源依据，不覆盖用户选定的日期。
+    return !isNaN(d.getTime()) && ymd(d) === batch.expiresAt ? d : null;
+  }
+
+  function formatExpiry(batch) {
+    var d = expiryInstant(batch);
+    return d ? ymd(d) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
+      : batch.expiresAt + "（具体时间未知）";
+  }
+
+  function statusOf(expiresAt, now, resetInstant) {
     var e = parseYmd(expiresAt);
     if (!e) return "unknown";
+    var d = expiryInstant({ expiresAt: expiresAt, resetInstant: resetInstant });
+    if (d) return d.getTime() <= (now || new Date()).getTime() ? "expired" : "active";
     return e.getTime() < startOfDay(now || new Date()).getTime() ? "expired" : "active";
   }
 
   /* ---------- 过期时间语义 ---------- */
 
-  /**
-   * 把各平台五花八门的写法统一成"最后一个可用日" YYYY-MM-DD。
-   *
-   * semantics:
-   *   "lastUsableDay"  原文是 valid until Oct 31  → 10-31 仍可用，11-01 起失效
-   *   "resetsAt"       原文是 resets on Nov 1     → 11-01 清零，最后可用日是 10-31
-   *   省略时按值的形态猜：带时间/时刻的一律当 resetsAt，纯日期当 lastUsableDay。
-   *
-   * 返回 { expiresAt, resetInstant, source } ；无法解析返回 null。
-   */
+  // 时刻按本地日期展示并保留精度；lastUsableDay 或纯日期不推测具体时分。
   function toExpiresAt(value, semantics, yearHint) {
     if (value == null || value === "") return null;
 
-    // 纯毫秒时间戳
-    if (typeof value === "number" && isFinite(value)) {
-      return fromInstant(new Date(value), yearHint);
+    if (typeof value === "number" && isFinite(value) || value instanceof Date) {
+      var instant = fromInstant(new Date(value));
+      if (instant && semantics === "lastUsableDay") instant.resetInstant = null;
+      return instant;
     }
-
-    if (value instanceof Date) return fromInstant(value, yearHint);
 
     var s = String(value).trim();
 
@@ -93,7 +97,7 @@
       if (!isNaN(d.getTime())) {
         return semantics === "lastUsableDay"
           ? { expiresAt: ymd(d), resetInstant: null, source: "iso-instant" }
-          : fromInstant(d, yearHint);
+          : fromInstant(d);
       }
     }
 
@@ -101,7 +105,7 @@
     var reset = /\b(reset|renew|expire[sd]?|refresh)\w*\s+(?:on|at)\s+([^\s,]+[, ]+[^\s,]+.*)$/i.exec(s);
     if (reset) {
       var rd = parseLooseDate(reset[2], yearHint);
-      if (rd) return fromInstant(rd, yearHint);
+      if (rd) return fromInstant(rd);
     }
 
     // valid until / until / to：Oct 31, 2026
@@ -118,16 +122,10 @@
     return null;
   }
 
-  /**
-   * 清零时刻 -> 最后可用日。
-   *
-   * 一律取该时刻的前一天，不区分"零点清零"还是"当天 09:00 清零"：
-   * 后者虽然当天早上还能用几小时，但把到期日标在那一天会让人误以为"一整天都能用"，
-   * 从而白白损失积分。宁可少标一天，精确时刻通过 resetInstant 在 UI 上单独说明。
-   */
-  function fromInstant(d, yearHint) {
+  function fromInstant(d) {
+    if (isNaN(d.getTime())) return null;
     return {
-      expiresAt: ymd(addDays(startOfDay(d), -1)),
+      expiresAt: ymd(d),
       resetInstant: d.toISOString(),
       source: "instant"
     };
@@ -181,9 +179,43 @@
     return [b.agent, normLabel(b.label), b.expiresAt].join("|");
   }
 
-  /** 冻结批次专用的松匹配键：不含 expiresAt，见 mergeBatches 里的说明 */
+  function actualExpiryLabel(b, expiresAt) {
+    if (["trae", "workbuddy", "lobsterai"].indexOf(b.agent) < 0 || !b.resetInstant) return b.label;
+    var d = new Date(b.resetInstant);
+    if (isNaN(d.getTime())) return b.label;
+    var oldDay = ymd(addDays(startOfDay(d), -1)).slice(5), actualDay = ymd(d).slice(5);
+    return String(b.label).replace(/ (\d{2}-\d{2})( · [a-f0-9]{8})?$/, function (match, day, tag) {
+      return day === oldDay || day === actualDay ? " " + (expiresAt || ymd(d)).slice(5) + (tag || "") : match;
+    });
+  }
+
+  function migrateExpiry(batch) {
+    var b = Object.assign({}, batch);
+    var d = b.resetInstant ? new Date(b.resetInstant) : null;
+    if (d && !isNaN(d.getTime())) {
+      if (!b.manualEdited && b.source !== "manual") {
+        b.label = actualExpiryLabel(b);
+        b.expiresAt = ymd(d);
+        b.batchId = batchId(b.agent, dedupKey(b));
+      }
+      b.status = statusOf(b.expiresAt, null, b.resetInstant);
+    }
+    if (b.scraped && ["qoder", "trae", "workbuddy", "lobsterai"].indexOf(b.agent) >= 0) {
+      var old = parseYmd(b.scraped.expiresAt);
+      if (old) {
+        // 旧冲突快照只存减过一天的日期，不能借用旧批次的时分冒充新抓取时刻。
+        var expiresAt = ymd(new Date(old.getFullYear(), old.getMonth(), old.getDate() + 1));
+        b.scraped = Object.assign({}, b.scraped, {
+          expiresAt: expiresAt, resetInstant: null, label: actualExpiryLabel(b, expiresAt)
+        });
+      }
+    }
+    return b;
+  }
+
   function frozenKey(b) {
-    return [b.agent, normLabel(b.label)].join("|");
+    // 冻结批次保留旧名称，匹配时换算日期后缀，避免升级后多出一笔。
+    return [b.agent, normLabel(actualExpiryLabel(b))].join("|");
   }
 
   /**
@@ -251,10 +283,6 @@
     return s.slice(-8);
   }
 
-  /**
-   * 到期日的「MM-DD」后缀，换算走 toExpiresAt，不由调用方自己减一天。
-   * adapter 用它拼 label，保证 label 里的日期和列表里显示的到期日永远一致。
-   */
   function daySuffix(value, semantics, yearHint) {
     var exp = toExpiresAt(value, semantics, yearHint);
     return exp ? exp.expiresAt.slice(5) : null;
@@ -283,7 +311,7 @@
       capturedAt: (opts.now || new Date()).toISOString(),
       source: raw.source || "auto",
       manualEdited: false,
-      status: statusOf(exp.expiresAt, opts.now)
+      status: statusOf(exp.expiresAt, opts.now, exp.resetInstant)
     };
     b.batchId = batchId(b.agent, dedupKey(b));
     // 不再往批次对象上挂 _expSource：它是"这条到期日是走哪条解析规则算出来的"
@@ -398,20 +426,16 @@
       }
 
       if (cur.manualEdited) {
-        // 过期状态照常跟着（用户填的）到期日走。手改之后这个分支是它唯一的更新入口，
-        // 不更新的话一个早已过期的冻结批次会永远挂着 status:"active"——
-        // 现在 UI 一律用 daysLeft 判断所以看不出来，但 status 是领域模型字段，
-        // 一旦导出或筛选用到它就会错。
-        cur.status = statusOf(cur.expiresAt, now);
+        cur.status = statusOf(cur.expiresAt, now, cur.resetInstant);
 
         // 冲突判定要跟"用户当前认的值"比，不是跟上次抓取值比——
         // 否则第一次同步必然误报冲突。
         var differs = n.remaining !== cur.remaining || n.granted !== cur.granted
-          || n.expiresAt !== cur.expiresAt;
+          || n.expiresAt !== cur.expiresAt || (n.resetInstant || null) !== (cur.resetInstant || null);
         if (differs) {
           cur.scraped = {
-            remaining: n.remaining, granted: n.granted,
-            expiresAt: n.expiresAt, capturedAt: now.toISOString()
+            label: n.label, remaining: n.remaining, granted: n.granted,
+            expiresAt: n.expiresAt, resetInstant: n.resetInstant || null, capturedAt: now.toISOString()
           };
           cur.conflict = true;
           conflicts++;
@@ -426,14 +450,18 @@
       var touched = false;
       if (cur.remaining !== n.remaining) { cur.remaining = n.remaining; touched = true; }
       if (cur.granted !== n.granted) { cur.granted = n.granted; touched = true; }
+      if ((cur.resetInstant || null) !== (n.resetInstant || null)) {
+        cur.resetInstant = n.resetInstant || null;
+        touched = true;
+      }
       if (cur.expiresAt !== n.expiresAt) {
         cur.expiresAt = n.expiresAt;
         cur.batchId = batchId(cur.agent, dedupKey(cur));
         touched = true;
       }
+      cur.status = statusOf(cur.expiresAt, now, cur.resetInstant);
       if (touched) {
         cur.capturedAt = now.toISOString();
-        cur.status = statusOf(cur.expiresAt, now);
         delete cur.conflict;
         delete cur.scraped;
         updated++;
@@ -451,7 +479,7 @@
       var b = out[i];
       if (!seen[dedupKey(b)] && agentsInIncoming[b.agent]) {
         b.absentCount = (b.absentCount || 0) + 1;
-        b.status = statusOf(b.expiresAt, now);
+        b.status = statusOf(b.expiresAt, now, b.resetInstant);
         // 权威清单（见规则 5）：没出现 = 这笔真的不在后台了，从余额里剔除。
         // 手改过的不动——用户的数字优先，UI 用 absentCount 提示他自己决定。
         if (authoritative[b.agent] && !b.manualEdited && !b.closed) {
@@ -489,7 +517,7 @@
     if (b.source === "auto") b.source = "manual";
     delete b.conflict;
     b.batchId = batchId(b.agent, dedupKey(b));
-    b.status = statusOf(b.expiresAt);
+    b.status = statusOf(b.expiresAt, null, b.resetInstant);
     return b;
   }
 
@@ -497,14 +525,19 @@
   function acceptScraped(batch) {
     var b = Object.assign({}, batch);
     if (b.scraped) {
+      b.label = b.scraped.label || actualExpiryLabel(b, b.scraped.expiresAt);
       b.remaining = b.scraped.remaining;
       b.granted = b.scraped.granted;
+      b.expiresAt = b.scraped.expiresAt;
+      b.resetInstant = b.scraped.resetInstant || null;
       b.capturedAt = b.scraped.capturedAt;
     }
     delete b.scraped;
     delete b.conflict;
     b.manualEdited = false;
     b.source = "auto";
+    b.batchId = batchId(b.agent, dedupKey(b));
+    b.status = statusOf(b.expiresAt, null, b.resetInstant);
     return b;
   }
 
@@ -554,7 +587,7 @@
       capturedAt: importIso(raw.capturedAt) || new Date().toISOString(),
       source: raw.source === "manual" ? "manual" : "auto",
       manualEdited: !!raw.manualEdited,
-      status: statusOf(exp),
+      status: statusOf(exp, null, importIso(raw.resetInstant)),
       absentCount: Math.max(0, importNum(raw.absentCount) || 0)
     };
     var upd = importIso(raw.updatedAt);
@@ -619,6 +652,7 @@
     rawBatches.forEach(function (r) {
       var b = importBatch(r, known);
       if (!b) { out.droppedBatches++; return; }
+      if (!(src.schema >= 2)) b = migrateExpiry(b);
       var k = dedupKey(b);
       if (seenKey[k]) { out.droppedBatches++; return; }   // 文件内部重复
       seenKey[k] = true;
@@ -675,6 +709,7 @@
   return {
     ymd: ymd, parseYmd: parseYmd, startOfDay: startOfDay, addDays: addDays,
     daysLeft: daysLeft, statusOf: statusOf,
+    expiryInstant: expiryInstant, formatExpiry: formatExpiry, migrateExpiry: migrateExpiry,
     toExpiresAt: toExpiresAt, parseLooseDate: parseLooseDate,
     dedupKey: dedupKey, batchId: batchId, normalizeBatch: normalizeBatch,
     stableTag: stableTag, daySuffix: daySuffix,

@@ -80,8 +80,8 @@ var good = [{ agentId: "qoder", score: 9, at: "2026-10-21T00:00:00Z", url: "http
 var ok = D.runSync("qoder", good, new Date(2026, 9, 21));
 eq("产出 2 个批次", ok.batches.length, 2);
 eq("批次带 agent", ok.batches[0].agent, "qoder");
-eq("清零时刻换成最后可用日", ok.batches.map(function (b) { return b.expiresAt; }),
-  ["2026-10-31", "2026-10-30"]);
+eq("清零时刻取本地实际到期日期", ok.batches.map(function (b) { return b.expiresAt; }),
+  ["2026-11-01", "2026-10-31"]);
 eq("单位默认 credits", ok.batches[0].unit, "credits");
 
 /* 失败路径要各有不同说法，不能都推给"没数据" */
@@ -102,6 +102,76 @@ var mixed = m2.batches.concat(N.normalizeBatch({ agent: "trae", label: "月度",
 var onlyQ = N.mergeBatches(mixed, D.runSync("qoder", good, new Date(2026, 9, 21)).batches, { now: new Date(2026, 9, 21) });
 var traeBatch = onlyQ.batches.filter(function (b) { return b.agent === "trae"; })[0];
 eq("同步 Qoder 不影响别家批次", !traeBatch.absentCount, true);
+
+// 用真实适配器和合成响应覆盖跨月时区与精确到期边界，不发网络请求。
+require("../adapters/qoder.js");
+require("../adapters/trae.js");
+require("../adapters/workbuddy.js");
+require("../adapters/lobsterai.js");
+var urls = {
+  qoder: "https://qoder.com/api/v2/me/usages/big_model_credits",
+  trae: "https://api.trae.cn/trae/api/v2/pay/user_current_entitlement_list",
+  workbuddy: "https://www.workbuddy.cn/billing/meter/get-user-resource-free-packages",
+  lobsterai: "https://lobsterai-server.youdao.com/api/user/profile-summary"
+};
+function checkExpiry(agent, body, day, instant, label, shape) {
+  var title = process.env.TZ + " " + agent + " " + shape;
+  var cap = { agentId: agent, url: urls[agent], status: 200, bodyPreview: JSON.stringify(body) };
+  var time = Date.parse(instant);
+  var results = [-1, 0, 1].map(function (offset) {
+    return D.runSync(agent, [cap], new Date(time + offset));
+  });
+  eq(title + "：同步成功", results.map(function (r) { return r.ok; }), [true, true, true]);
+  if (!results.every(function (r) { return r.ok; })) return;
+  eq(title + "：各有一笔", results.map(function (r) { return r.batches.length; }), [1, 1, 1]);
+  if (!results.every(function (r) { return r.batches.length === 1; })) return;
+  var batches = results.map(function (r) { return r.batches[0]; });
+  eq(title + "：实际到期日期", batches.map(function (b) { return b.expiresAt; }), [day, day, day]);
+  eq(title + "：保留精确时刻", batches.map(function (b) { return b.resetInstant; }), [instant, instant, instant]);
+  eq(title + "：label 与到期日期一致", batches.map(function (b) { return b.label; }), [label, label, label]);
+  eq(title + "：到期前/到期时/到期后", batches.map(function (b) { return b.status; }), ["active", "expired", "expired"]);
+}
+
+var originalTz = process.env.TZ;
+try {
+  [
+    { tz: "UTC", day: "2026-10-31", localInstant: "2026-11-01T00:30:05.000Z" },
+    { tz: "Asia/Shanghai", day: "2026-11-01", localInstant: "2026-10-31T16:30:05.000Z" }
+  ].forEach(function (zone) {
+    process.env.TZ = zone.tz;
+    checkExpiry("qoder", {
+      resource_package_quota: { quota_detail: [{
+        id: "fake-tz-0001", source: "BONUS", limit_value: 100, remaining_value: 80,
+        expires_at: Date.parse("2026-10-31T16:30:05.123Z")
+      }] }
+    }, zone.day, "2026-10-31T16:30:05.123Z", "BONUS #0001", "毫秒时间戳");
+    checkExpiry("trae", {
+      user_entitlement_pack_list: [{
+        display_desc: "签到奖励", usage: { credits_amount: 20 },
+        expire_time: Date.parse("2026-10-31T16:30:05.000Z") / 1000,
+        entitlement_base_info: { quota: { credits_limit: 100 } }
+      }]
+    }, zone.day, "2026-10-31T16:30:05.000Z", "签到奖励 " + zone.day.slice(5), "秒时间戳");
+
+    [
+      { shape: "无时区时间", workbuddy: "2026-11-01 00:30:05", lobsterai: "2026-11-01T00:30:05",
+        day: "2026-11-01", instant: zone.localInstant },
+      { shape: "带时区时间", workbuddy: "2026-10-31T16:30:05.123Z", lobsterai: "2026-11-01T00:30:05.123+08:00",
+        day: zone.day, instant: "2026-10-31T16:30:05.123Z" }
+    ].forEach(function (sample) {
+      checkExpiry("workbuddy", { code: 0, data: { Accounts: [{
+        PackageName: "赠送包", ResourceId: "fake-tz-resource",
+        CycleCapacitySize: 100, CycleCapacityRemain: 80, CycleEndTime: sample.workbuddy
+      }] } }, sample.day, sample.instant,
+      "赠送包 " + sample.day.slice(5) + " · " + N.stableTag("fake-tz-resource"), sample.shape);
+      checkExpiry("lobsterai", { code: 0, data: { creditItems: [{
+        label: "每日登录奖励", creditsRemaining: 80, expiresAt: sample.lobsterai
+      }] } }, sample.day, sample.instant, "每日登录奖励 " + sample.day.slice(5), sample.shape);
+    });
+  });
+} finally {
+  process.env.TZ = originalTz;
+}
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

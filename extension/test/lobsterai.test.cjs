@@ -66,8 +66,8 @@ eq("只认 creditItems：无到期日/无剩余量跳过，0 保留", rows.lengt
 eq("明细之和等于服务端合计（映射没漏项）",
   rows.reduce(function (s, r) { return s + r.remaining; }, 0),
   JSON.parse(BODY).data.totalCreditsRemaining);
-eq("同名每日奖励用最后可用日区分", rows.map(function (r) { return r.label; }),
-  ["每日登录奖励 10-23", "每日登录奖励 10-27", "加油包 09-13", "每日登录奖励 10-29"]);
+eq("同名每日奖励用实际到期日期区分", rows.map(function (r) { return r.label; }),
+  ["每日登录奖励 10-24", "每日登录奖励 10-28", "加油包 09-14", "每日登录奖励 10-30"]);
 eq("granted 暂用剩余量填，不是 0", rows.map(function (r) { return [r.granted, r.remaining]; }),
   [[100, 100], [50.5, 50.5], [1000, 1000], [0, 0]]);
 
@@ -89,8 +89,8 @@ var noisy = [
 ];
 eq("高分的无关接口不挤掉 profile-summary", D.pickCapture(noisy, "lobsterai").url, capture.url);
 eq("混合样本里仍能认出 4 个批次", D.runSync("lobsterai", noisy, now).batches.length, 4);
-eq("清零时刻减一天成最后可用日", res.batches.map(function (b) { return b.expiresAt; }),
-  ["2026-10-23", "2026-10-27", "2027-09-13", "2026-10-29"]);
+eq("无时区时间取本地实际到期日期", res.batches.map(function (b) { return b.expiresAt; }),
+  ["2026-10-24", "2026-10-28", "2027-09-14", "2026-10-30"]);
 eq("resetInstant 保留精确时刻", res.batches[0].resetInstant,
   new Date(2026, 9, 24, 10, 30, 5).toISOString());
 eq("全部是 active", res.batches.map(function (b) { return b.status; }),

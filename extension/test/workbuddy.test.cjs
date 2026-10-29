@@ -107,14 +107,14 @@ eq("发放量取 CycleCapacitySize", rows.map(function (r) { return r.granted; }
   [500, 1500, 100, 8, 7, 999, 9, 500]);
 eq("体验版保留接口给的精确小数", rows[0].remaining, 123.45000016);
 eq("同名同日包靠稳定短码区分", (function () {
-  var same = rows.filter(function (r) { return /12-09/.test(r.label); });
+  var same = rows.filter(function (r) { return /12-10/.test(r.label); });
   return [same.length, new Set(same.map(function (r) { return r.label; })).size];
 })(), [2, 2]);
 eq("8 个 label 两两不同", new Set(rows.map(function (r) { return r.label; })).size, 8);
 eq("label 末尾是 8 位稳定短码", rows.every(function (r) { return / · [0-9a-f]{8}$/.test(r.label); }), true);
 eq("label 不泄露 ResourceId 原文", rows.some(function (r) { return /fake-/.test(r.label); }), false);
 eq("label 不泄露 payerUin", rows.some(function (r) { return /FAKE_UIN/.test(r.label); }), false);
-eq("PackageName 为空时回退 SubProductName", /^腾讯云代码助手 \(IDE\) - 赠送包 12-15 · /.test(rows[7].label), true);
+eq("PackageName 为空时回退 SubProductName", /^腾讯云代码助手 \(IDE\) - 赠送包 12-16 · /.test(rows[7].label), true);
 eq("两次提取的短码稳定", D.get("workbuddy").extract(capture).map(function (r) { return r.label; }),
   rows.map(function (r) { return r.label; }));
 
@@ -131,10 +131,10 @@ var res = D.runSync("workbuddy", [capture], now);
 eq("runSync 走通", res.ok, true);
 eq("产出 8 个批次", res.batches.length, 8);
 eq("累计剩余 3234.45", Math.abs(res.batches.reduce(function (s, b) { return s + b.remaining; }, 0) - 3234.45000016) < 1e-6, true);
-eq("CycleEndTime 按清零时刻减一天", res.batches.map(function (b) { return b.expiresAt; }),
-  ["2026-10-29", "2026-12-07", "2026-12-09", "2026-12-09", "2026-12-11",
-    "2027-02-07", "2026-12-14", "2026-12-15"]);
-eq("体验版到期日不受 2035 年的 DeductionEndTime 影响", res.batches[0].expiresAt, "2026-10-29");
+eq("CycleEndTime 取本地实际到期日期", res.batches.map(function (b) { return b.expiresAt; }),
+  ["2026-10-30", "2026-12-08", "2026-12-10", "2026-12-10", "2026-12-12",
+    "2027-02-08", "2026-12-15", "2026-12-16"]);
+eq("体验版到期日不受 2035 年的 DeductionEndTime 影响", res.batches[0].expiresAt, "2026-10-30");
 eq("体验版原始清零时刻保留秒", res.batches[0].resetInstant,
   new Date(2026, 9, 30, 23, 59, 59).toISOString());
 eq("全部是 active", res.batches.map(function (b) { return b.status; }),
@@ -154,7 +154,7 @@ usedMore.data.Accounts[2].CycleCapacityRemainPrecise = "40";
 usedMore.data.Accounts[2].CycleCapacityUsedPrecise = "60";
 var m3 = N.mergeBatches(m2.batches, D.runSync("workbuddy",
   [Object.assign({}, capture, { bodyPreview: JSON.stringify(usedMore) })], now).batches, { now: now });
-var sameDay = m3.batches.filter(function (b) { return /12-09/.test(b.label); })
+var sameDay = m3.batches.filter(function (b) { return /12-10/.test(b.label); })
   .sort(function (a, b) { return b.remaining - a.remaining; });
 eq("消耗后只剩 40", sameDay[0].remaining, 40);
 eq("同名同日的另一笔仍是 8", sameDay[1].remaining, 8);

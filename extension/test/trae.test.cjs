@@ -80,8 +80,8 @@ eq("这是钩子平台，没有 direct 配置", D.get("trae").direct, undefined)
 
 var rows = D.get("trae").extract(capture);
 eq("免费包/零额度/无到期日跳过，其余逐笔成批", rows.length, 5);
-eq("同名签到包用最后可用日区分", rows.map(function (r) { return r.label; }),
-  ["每月登录赠送 10-31", "签到奖励 10-22", "签到奖励 10-23", "签到奖励 10-24", "签到奖励 10-25"]);
+eq("同名签到包用实际到期日期区分", rows.map(function (r) { return r.label; }),
+  ["每月登录赠送 11-01", "签到奖励 10-23", "签到奖励 10-24", "签到奖励 10-25", "签到奖励 10-26"]);
 eq("granted=credits_limit，remaining=limit-used（用满保留 0）",
   rows.map(function (r) { return [r.granted, r.remaining]; }),
   [[300, 249.5], [120, 0], [120, 120], [80, 0], [80, 80]]);
@@ -90,8 +90,8 @@ eq("累计剩余与明细一致", rows.reduce(function (s, r) { return s + r.rem
 var now = new Date(2026, 9, 22, 12, 0, 0);
 var res = D.runSync("trae", [capture], now);
 eq("runSync 走通", res.ok, true);
-eq("秒级时间戳按清零时刻减一天", res.batches.map(function (b) { return b.expiresAt; }),
-  ["2026-10-31", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25"]);
+eq("秒级时间戳取本地实际到期日期", res.batches.map(function (b) { return b.expiresAt; }),
+  ["2026-11-01", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26"]);
 eq("resetInstant 保留秒级精确时刻", res.batches[1].resetInstant,
   new Date(2026, 9, 23, 10, 0, 0).toISOString());
 eq("全部是 active", res.batches.map(function (b) { return b.status; }),
@@ -129,7 +129,8 @@ var msBody = JSON.parse(BODY);
 msBody.user_entitlement_pack_list[1].expire_time = C1_EXP * 1000;
 msBody.user_entitlement_pack_list[1].entitlement_base_info.end_time = C1_EXP * 1000;
 var msRows = D.get("trae").extract(Object.assign({}, capture, { bodyPreview: JSON.stringify(msBody) }));
-eq("毫秒时间戳也能识别", msRows[1].label, "签到奖励 10-22");
+eq("毫秒时间戳也能识别", msRows[0].label, "每月登录赠送 10-23");
+eq("毫秒时间戳保留精确时刻", msRows[0].expiry, new Date(C1_EXP * 1000).toISOString());
 
 /* 接口层失败要说清楚，不能伪装成"没认出批次" */
 var unauth = Object.assign({}, capture, { status: 401, bodyPreview: '{"message":"unauthorized"}' });

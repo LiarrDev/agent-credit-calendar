@@ -12,8 +12,8 @@
  *     // capture: sanitizeCapture() 之后的样本（url / method / status / bodyPreview / truncated）
  *     // 返回原始批次数组，字段名对齐 normalizeBatch 的入参：
  *     //   { label, granted, remaining, expiry, semantics, unit }
- *     //   semantics 取值必须用 normalize.js 认的两个词（写别的词一律按清零时刻减一天）：
- *     //     "lastUsableDay" 原文已是最后一天，直接用；"resetsAt" 清零时刻，会减一天；省略同 resetsAt
+ *     //   日期按原值使用；时刻取本地到期日期，并保留 resetInstant，不减一天。
+ *     //   semantics 沿用 normalize.js 的 "lastUsableDay" / "resetsAt" 兼容取值。
  *     extract: function (capture) { return [ ... ]; },
  *     // 可选：已知接口的页面内直读配置（目前只有 Qoder）。
  *     // 有 direct 的平台不再注入钩子，background 会开同源页执行一次只读 GET。

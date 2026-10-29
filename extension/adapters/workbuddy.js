@@ -27,7 +27,7 @@
  *   - 余额与发放量取 CycleCapacity*Precise（回退到 CycleCapacity*）。样本里
  *     CapacitySize / CapacityRemain / CapacityUsed 全是 0，拿它当余额会把 40 余笔
  *     全部显示成 0。Precise 字段带小数（体验版剩余带小数）。
- *   - 到期时刻取 CycleEndTime，按清零时刻减一天得到最后可用日。
+ *   - 到期时刻取 CycleEndTime，交给 normalize 取本地到期日期，保留精确时刻。
  *     不用 DeductionEndTime：体验版那笔的 DeductionEndTime 在 2035 年，明显不是
  *     这一轮的失效时刻；也不用 ExpiredTime（样本里全是空串）。
  *   - 不按 Status / CapacityType 过滤：样本里 40 余笔 Status 都是 0，没有枚举定义；
@@ -60,8 +60,8 @@
     return num(item[plainKey]);
   }
 
-  /** 与服务端时间一致的展示用后缀；换算交给 normalize，避免两处规则漂移。 */
-  function lastUsableDay(iso) {
+  /** 本地到期日期的展示后缀；换算交给 normalize，避免两处规则漂移。 */
+  function expiryDay(iso) {
     return N && N.daySuffix ? N.daySuffix(iso, "resetsAt") : null;
   }
 
@@ -125,7 +125,7 @@
 
       var iso = item.CycleEndTime;
       if (!iso) return;
-      var day = lastUsableDay(iso);
+      var day = expiryDay(iso);
       if (!day) return;
 
       var seed = stableSeed(item);

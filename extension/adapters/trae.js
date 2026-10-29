@@ -28,8 +28,8 @@
  *   - 剩余 = credits_limit - usage.credits_amount；usage 为空表示还没用。
  *     用满的包 remaining=0 仍保留，否则同步后旧余额会停在用满之前。
  *   - expire_time / end_time 是**秒**级时间戳（样本是 10 位）。转成 ISO 后交给
- *     normalize，按清零时刻减一天得到最后可用日；精确时刻留在 resetInstant。
- *   - label 用 display_desc（回退 group_name / package_name），末尾加最后可用日
+ *     normalize 取本地到期日期；精确时刻留在 resetInstant。
+ *   - label 用 display_desc（回退 group_name / package_name），末尾加到期日期
  *     的 MM-DD。签到奖励会有十几笔完全同名，不加日期无法区分，冻结批次的
  *     (agent+label) 兜底匹配也会串笔。同名**且**同到期日的两笔再加稳定短码区分，
  *     否则 dedupKey 相同会在 mergeBatches 里并成一笔、丢掉一笔真实余额
@@ -51,8 +51,8 @@
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
 
-  /** 与服务端时间一致的展示用后缀；换算交给 normalize，避免两处规则漂移。 */
-  function lastUsableDay(iso) {
+  /** 本地到期日期的展示后缀；换算交给 normalize，避免两处规则漂移。 */
+  function expiryDay(iso) {
     return N && N.daySuffix ? N.daySuffix(iso) : null;
   }
 
@@ -138,7 +138,7 @@
       var remaining = limit - used;
       if (remaining < 0) remaining = 0;
 
-      var day = lastUsableDay(iso);
+      var day = expiryDay(iso);
       rows.push({
         base: baseLabel(item, base),
         day: day,

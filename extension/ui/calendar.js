@@ -126,7 +126,7 @@
 
   function ORDER() { return AG.AGENTS.map(function (a) { return a.id; }); }
   function colorOf(id) { var a = AG.byId(id); return a ? a.color : "#888"; }
-  function isExpired(b) { var d = N.daysLeft(b.expiresAt, TODAY); return d != null && d < 0; }
+  function isExpired(b) { return N.statusOf(b.expiresAt, new Date(), b.resetInstant) === "expired"; }
   /* 平台已经不再返回的批次（只有 authoritative 平台会标）：历史留着备查，
    * 但一分钱都不该计入余额、日历和「即将到期」——它已经不在后台了，
    * 余额是 0 也好、被平台回收也好，本机都无从知道，唯一确定的结论是"这钱不在了"。 */
@@ -149,13 +149,20 @@
     return doc.batches.filter(function (b) { return !isGone(b) && b.expiresAt === dayStr; })
       .sort(function (a, c) { return c.remaining - a.remaining; });
   }
+  function compareExpiry(a, c) {
+    var days = N.daysLeft(a.expiresAt, TODAY) - N.daysLeft(c.expiresAt, TODAY);
+    if (days) return days;
+    // 同日未知时刻放在日末，不能把纯日期误当成零点到期。
+    var end = N.parseYmd(a.expiresAt);
+    end.setHours(24, 0, 0, 0);
+    return (N.expiryInstant(a) || end).getTime() - (N.expiryInstant(c) || end).getTime();
+  }
   function upcoming() {
     var lim = doc.settings.threshold;
     return doc.batches.filter(function (b) {
-      if (isGone(b)) return false;
+      if (isGone(b) || isExpired(b)) return false;
       var d = N.daysLeft(b.expiresAt, TODAY); return d != null && d >= 0 && d <= lim;
-    })
-      .sort(function (a, c) { return N.daysLeft(a.expiresAt, TODAY) - N.daysLeft(c.expiresAt, TODAY); });
+    }).sort(compareExpiry);
   }
   function agentSummary(agent) {
     var all = doc.batches.filter(function (b) { return b.agent === agent; });
@@ -172,7 +179,7 @@
     act.forEach(function (b) { if (b.manualEdited) manualCount++; if (b.conflict) conflicts++; });
     var soonest = null;
     act.forEach(function (b) {
-      if (!soonest || N.daysLeft(b.expiresAt, TODAY) < N.daysLeft(soonest.expiresAt, TODAY)) soonest = b;
+      if (!soonest || compareExpiry(b, soonest) < 0) soonest = b;
     });
     var newest = all.slice().sort(function (a, c) { return a.capturedAt < c.capturedAt ? 1 : -1; })[0];
     var cfg = doc.agents[agent] || {};
@@ -227,7 +234,7 @@
       else {
         var d = N.daysLeft(s.soonest.expiresAt, TODAY);
         var k = d <= 2 ? "hot" : d <= 7 ? "warm" : "cool";
-        cd = '<span class="cd ' + k + '">' + (d === 0 ? "今天最后可用" : "还有 " + d + " 天") + "</span>";
+        cd = '<span class="cd ' + k + '">' + (d === 0 ? "今天到期" : "还有 " + d + " 天") + "</span>";
       }
       return '<div class="card" style="--c:' + colorOf(s.agent) + '">'
         + '<div class="card-head"><span class="agent-name">' + esc(s.name) + "</span>"
@@ -302,19 +309,31 @@
       var cls = "cell" + (out ? " out" : "") + (past ? " past" : "")
         + ((d.getDay() === 0 || d.getDay() === 6) ? " we" : "")
         + (d.getTime() === selTs ? " sel" : "");
-      var items = out ? [] : expiringOn(ds);
-      var shown = items.slice(0, 3);
+      var items = out ? [] : expiringOn(ds), byAgent = Object.create(null), groups = [];
+      items.forEach(function (b) {
+        var g = byAgent[b.agent];
+        if (!g) {
+          g = byAgent[b.agent] = { agent: b.agent, unit: b.unit, remaining: 0, count: 0, expired: true };
+          groups.push(g);
+        }
+        g.remaining += b.remaining;
+        g.count++;
+        g.expired = g.expired && isExpired(b);
+      });
+      groups.sort(function (a, c) { return c.remaining - a.remaining; });
+      var shown = groups.slice(0, 3);
       var html = '<div class="' + cls + '" data-day="' + ds + '"><div class="dnum">'
         + (d.getTime() === todayTs ? '<span class="td">今天</span>' : "")
         + '<span style="' + (d.getDate() === 1 ? "font-weight:650;color:var(--ink)" : "") + '">'
         + d.getDate() + "</span></div>";
       if (shown.length) {
-        html += '<div class="entries">' + shown.map(function (b) {
-          return '<div class="e' + (past ? " dim" : "") + '" style="--c:' + colorOf(b.agent)
-            + '" data-bid="' + b.batchId + '" title="' + esc(b.label) + '"><b>'
-            + esc((doc.agents[b.agent] || {}).name || b.agent) + "</b> " + chipAmt(b) + "</div>";
+        html += '<div class="entries">' + shown.map(function (g) {
+          var name = esc((doc.agents[g.agent] || {}).name || g.agent);
+          return '<div class="e' + (g.expired ? " dim" : "") + '" style="--c:' + colorOf(g.agent)
+            + '" data-agent="' + esc(g.agent) + '" title="' + name + " · " + g.count + ' 笔，点击查看当日明细"><b>'
+            + name + "</b> " + chipAmt(g) + "</div>";
         }).join("")
-          + (items.length > 3 ? '<div class="more">+' + (items.length - 3) + " 笔，点开看</div>" : "")
+          + (groups.length > 3 ? '<div class="more">+' + (groups.length - 3) + " 个平台，点开看</div>" : "")
           + "</div>";
       }
       return html + "</div>";
@@ -325,7 +344,7 @@
     $("#legend").innerHTML = ORDER().map(function (a) {
       return '<span class="lg" style="--c:' + colorOf(a) + '"><span class="dot"></span>'
         + esc((doc.agents[a] || {}).name || a) + "（" + unitLabel((doc.agents[a] || {}).unit || "credits") + "）</span>";
-    }).join("") + '<span class="lg" style="margin-left:auto;color:var(--ink-3)">仅标当日到期 · 单位不跨 agent 合并</span>';
+    }).join("") + '<span class="lg" style="margin-left:auto;color:var(--ink-3)">仅标当日到期 · 同平台合并展示</span>';
   }
 
   /* ---------- 即将到期 ---------- */
@@ -345,9 +364,9 @@
         + '<span class="bar"></span><div class="info"><div class="l1">'
         + esc((doc.agents[b.agent] || {}).name || b.agent)
         + ' <span style="font-weight:450;color:var(--ink-2)">· ' + esc(shortLbl(b.label)) + "</span></div>"
-        + '<div class="l2">' + b.expiresAt.slice(5).replace("-", "/") + " 到期 · "
+        + '<div class="l2">' + esc(N.formatExpiry(b)) + " 到期 · "
         + '<span style="color:' + k + ';font-weight:600">'
-        + (d === 0 ? "今天最后可用" : "还剩 " + d + " 天") + "</span></div></div>"
+        + (d === 0 ? "今天到期" : "还剩 " + d + " 天") + "</span></div></div>"
         + '<div class="amt">' + fmt(b.unit, b.remaining) + "<small>" + unitLabel(b.unit) + "</small></div></div>";
     }).join("");
   }
@@ -372,7 +391,8 @@
               return '<div class="row" data-bid="' + b.batchId + '" style="--c:' + colorOf(b.agent) + '">'
                 + '<span class="bar"></span><div class="info"><div class="l1">'
                 + esc((doc.agents[b.agent] || {}).name || b.agent) + "</div>"
-                + '<div class="l2">' + esc(b.label)
+                + '<div class="l2">' + esc(b.label) + "</div>"
+                + '<div class="l2">' + esc(N.formatExpiry(b)) + " 到期"
                 + (isExpired(b) ? ' · <span style="color:#b91c1c">已过期</span>' : "") + "</div></div>"
                 + '<div class="amt">' + fmt(b.unit, b.remaining) + "<small>" + unitLabel(b.unit) + "</small></div></div>";
             }).join("") + "</div>"
@@ -383,7 +403,7 @@
     }
 
     box.innerHTML = '<div class="sec-h"><h3>批次明细</h3></div>'
-      + '<div class="hint">点日历里的色条，或点「即将到期」里的任意一行，就能查看和修正这一笔积分。'
+      + '<div class="hint">点日历里的色条查看当天逐笔明细，再选一笔查看和修正；也可以直接点「即将到期」里的任意一行。'
       + "<br><br>抓取一定会出错，所以<b style=\"color:var(--ink-2)\">必须能手动改</b>：改过期日、改剩余量、删除、补录。"
       + "改过的批次会标「手动改动」，之后同步不再覆盖它的过期日，而是把抓取值留给你裁决。</div>";
   }
@@ -405,7 +425,7 @@
       + exp.map(function (b) {
           return '<div class="row" data-bid="' + b.batchId + '"><span class="bar"></span><div class="info">'
             + '<div class="l1">' + esc(shortLbl(b.label)) + "</div>"
-            + '<div class="l2">' + b.expiresAt + " 到期 · 已过期 " + (-N.daysLeft(b.expiresAt, TODAY)) + " 天</div></div>"
+            + '<div class="l2">' + esc(N.formatExpiry(b)) + " 到期 · " + expiryStatus(b) + "</div></div>"
             + '<div class="amt" style="color:var(--warn)">' + fmt(b.unit, b.remaining)
             + "<small>" + unitLabel(b.unit) + " 未用</small></div></div>";
         }).join("")
@@ -452,13 +472,34 @@
       + "如果哪一笔其实还在（平台临时漏返回），下次同步它自己会重新计入。</div>";
   }
 
+  function expiryStatus(b) {
+    var d = N.daysLeft(b.expiresAt, TODAY);
+    if (d == null) return "到期日期未知";
+    if (isExpired(b)) return '<span style="color:#b91c1c">已过期' + (d < 0 ? " " + (-d) + " 天" : "") + "</span>";
+    return d === 0 ? '<span style="color:#b91c1c">今天到期</span>' : "还有 " + d + " 天";
+  }
+
+  function expiryMeta(b) {
+    return N.expiryInstant(b) ? "<br>实际清零时刻 " + esc(N.formatExpiry(b)) : "";
+  }
+
+  // 只更新到期说明，不重建表单；草稿日期与旧时刻不匹配时立即隐藏旧时刻。
+  function refreshEditExpiry() {
+    var b = byId(edit), inp = $('#detail [data-f="expiresAt"]');
+    if (!b || !inp) return;
+    var expiry = { expiresAt: inp.value, resetInstant: b.resetInstant };
+    $("#editExpiryStatus").innerHTML = expiryStatus(expiry);
+    $("#editExpiryMeta").innerHTML = expiryMeta(expiry);
+  }
+
   function renderEdit(box, b) {
     if (!b) { edit = null; return renderDetail(); }
-    var d = N.daysLeft(b.expiresAt, TODAY);
     var conflict = b.conflict && b.scraped
       ? '<div class="conflict"><b>抓取值与手填值不一致</b>，你说了算：'
-        + '<div class="r"><span>你填的</span><span>' + fmt(b.unit, b.remaining) + "</span></div>"
+        + '<div class="r"><span>你填的</span><span>' + fmt(b.unit, b.remaining)
+        + "<br>" + esc(N.formatExpiry(b)) + " 到期</span></div>"
         + '<div class="r"><span>抓到的</span><span>' + fmt(b.unit, b.scraped.remaining)
+        + "<br>" + esc(N.formatExpiry(b.scraped)) + " 到期"
         + "（" + ago(b.scraped.capturedAt) + "）</span></div>"
         + '<button class="mini" data-act="accept">采用抓取值</button></div>'
       : "";
@@ -468,12 +509,10 @@
       + conflict
       + '<div class="ttl">' + esc((doc.agents[b.agent] || {}).name || b.agent)
       + (b.manualEdited ? '<span class="manual-flag">手动改动</span>' : "") + "</div>"
-      + '<div class="lbl" style="color:var(--ink-2)">' + esc(b.label) + " · "
-      + (d < 0 ? '<span style="color:#b91c1c">已过期 ' + (-d) + " 天</span>"
-        : d === 0 ? '<span style="color:#b91c1c">今天最后可用</span>'
-        : "还有 " + d + " 天") + "</div>"
+      + '<div class="lbl" style="color:var(--ink-2)">' + esc(b.label)
+      + ' · <span id="editExpiryStatus">' + expiryStatus(b) + "</span></div>"
       + '<div class="fld"><label>批次名称</label><input data-f="label" value="' + esc(b.label) + '"></div>'
-      + '<div class="fld"><label>过期日（最后一个可用日）</label>'
+      + '<div class="fld"><label>到期日期</label>'
       + '<input type="date" data-f="expiresAt" value="' + b.expiresAt + '"></div>'
       + '<div class="fld two"><div><label>剩余 ' + unitLabel(b.unit) + "</label>"
       + '<input type="number" data-f="remaining" value="' + b.remaining + '" min="0"></div>'
@@ -485,7 +524,7 @@
       + '<div class="meta">batchId ' + b.batchId + "<br>dedupKey " + esc(N.dedupKey(b)) + "<br>"
       + (b.source === "manual" ? "手填时间 " : "取数时间 ")
       + new Date(b.capturedAt).toLocaleString("zh-CN")
-      + (b.resetInstant ? "<br>实际清零时刻 " + new Date(b.resetInstant).toLocaleString("zh-CN") : "")
+      + '<span id="editExpiryMeta">' + expiryMeta(b) + "</span>"
       + (b.updatedAt ? '<br><span style="color:#92400e">手动修改于 '
           + new Date(b.updatedAt).toLocaleString("zh-CN") + "（同步不再覆盖它的过期日）</span>" : "")
       + (b.absentCount ? '<br><span style="color:#9a3412">最近 ' + b.absentCount + " 次同步没返回这笔</span>" : "")
@@ -508,7 +547,7 @@
       + ORDER().map(function (a) { return '<option value="' + a + '">' + esc(doc.agents[a].name) + "</option>"; }).join("")
       + "</select></div>"
       + '<div class="fld"><label>批次名称</label><input data-nf="label" placeholder="如：11月 套餐积分"></div>'
-      + '<div class="fld"><label>过期日</label><input type="date" data-nf="expiresAt" value="' + defDay + '"></div>'
+      + '<div class="fld"><label>到期日期</label><input type="date" data-nf="expiresAt" value="' + defDay + '"></div>'
       + '<div class="fld two"><div><label>剩余</label><input type="number" data-nf="remaining" value="1000" min="0"></div>'
       + "<div><label>发放总量</label><input type=\"number\" data-nf=\"granted\" value=\"6000\" min=\"0\"></div></div>"
       + '<div class="acts"><button class="primary" data-act="addsave">加入日历</button></div></div>';
@@ -1071,6 +1110,15 @@
     if (authOpen) renderAuth();
   }
 
+  function refreshTimeViews() {
+    if (!doc) return;
+    TODAY = N.startOfDay(new Date());
+    renderCards(); renderCal(); renderUpcoming(); renderFresh(); renderNotice();
+    if (edit) refreshEditExpiry();
+    else renderDetail(); // renderDetail 自己保护补录表单
+    // 不重画授权面板、页脚或同步按钮，保留输入、加载态和两段式确认。
+  }
+
   /* ---------- 事件 ---------- */
 
   $("#cards").addEventListener("click", function (e) {
@@ -1086,12 +1134,11 @@
   });
 
   $("#grid").addEventListener("click", function (e) {
-    var chip = e.target.closest("[data-bid]");
-    if (chip) { edit = chip.getAttribute("data-bid"); adding = false; sel = null; wasted = null; delConfirm = null; persist(); render(); return; }
     var cell = e.target.closest(".cell");
     if (!cell || cell.classList.contains("out")) return;
     var d = cell.getAttribute("data-day");
-    sel = (sel === d ? null : d); edit = null; adding = false; wasted = null; delConfirm = null;
+    sel = e.target.closest(".entries") ? d : (sel === d ? null : d);
+    edit = null; adding = false; wasted = null; delConfirm = null;
     persist(); render();
   });
 
@@ -1099,6 +1146,10 @@
     var r = e.target.closest("[data-bid]"); if (!r) return;
     edit = r.getAttribute("data-bid"); adding = false; sel = null; wasted = null; delConfirm = null;
     persist(); render();
+  });
+
+  $("#detail").addEventListener("input", function (e) {
+    if (edit && e.target.getAttribute("data-f") === "expiresAt") refreshEditExpiry();
   });
 
   $("#detail").addEventListener("click", function (e) {
@@ -1209,7 +1260,7 @@
     // 钳制：下拉取到空值/非法值时 +this.value 是 NaN，落库后「即将到期」会永久空白
     // 且不给任何提示——用户只会以为"最近没有要过期的"，其实是阈值坏了。
     var v = parseInt(this.value, 10);
-    if (!isFinite(v)) v = 14;
+    if (!isFinite(v)) v = 3;
     v = Math.min(365, Math.max(1, v));
     commit(function (f) { f.settings.threshold = v; });
     renderUpcoming();
@@ -1552,5 +1603,6 @@
     toast("全部数据已导出：包含捕获样本，可能带账号标识；别上传到公开仓库");
   };
 
+  setInterval(refreshTimeViews, 60000);
   boot();
 })();

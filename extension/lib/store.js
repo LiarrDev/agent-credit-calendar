@@ -32,11 +32,11 @@
       };
     });
     return {
-      schema: 1,
+      schema: 2,
       batches: [],
       agents: agents,
       captures: [],
-      settings: { threshold: 14, staleDays: 7, lazySyncDays: 3 },
+      settings: { threshold: 3, staleDays: 7, lazySyncDays: 3 },
       lastSyncAt: null,
       ui: { view: null, sel: null, edit: null, wasted: null }
     };
@@ -58,7 +58,7 @@
      * upcoming() 的 `d <= NaN` 恒为 false →「未来 14 天无积分到期」永远显示，
      * 而 #thr 下拉的 value 是 "NaN"、选中态直接空掉。用户看不出任何异常，
      * 只会以为"最近确实没有要过期的"。 */
-    st.threshold = clampInt(st.threshold, 1, 365, 14);
+    st.threshold = clampInt(st.threshold, 1, 365, 3);
     st.staleDays = clampInt(st.staleDays, 1, 60, 7);
     st.lazySyncDays = clampInt(st.lazySyncDays, 0, 90, 3);
     d.settings = st;
@@ -107,6 +107,17 @@
     });
     if (!Array.isArray(d.batches)) d.batches = [];
     if (!Array.isArray(d.captures)) d.captures = [];
+    if (doc && !(doc.schema >= 2)) {
+      d.batches = d.batches.map(function (b) {
+        var migrated = root.CreditNormalize.migrateExpiry(b);
+        if (b.batchId && d.ui.edit === b.batchId) {
+          d.ui.edit = migrated.batchId;
+          if (d.ui.sel === b.expiresAt) d.ui.sel = migrated.expiresAt;
+        }
+        return migrated;
+      });
+    }
+    d.schema = 2;
     return d;
   }
 
