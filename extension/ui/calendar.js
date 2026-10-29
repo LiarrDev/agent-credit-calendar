@@ -1014,6 +1014,8 @@
       + "</a>"
       + '<span style="color:var(--ink-3)"> · </span>'
       + '<a href="#" id="impLink" style="color:var(--ink-3)">导入备份（JSON）</a>'
+      + '<span style="color:var(--ink-3)"> · </span>'
+      + '<a href="https://github.com/LiarrDev/agent-credit-calendar" target="_blank" rel="noopener" style="color:var(--ink-3)">在 GitHub 查看源码 ↗</a>'
       + '<input type="file" id="impFile" accept=".json,application/json" hidden>';
 
     $("#impLink").onclick = function (e) { e.preventDefault(); $("#impFile").click(); };

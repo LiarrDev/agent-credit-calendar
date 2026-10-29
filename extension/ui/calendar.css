@@ -28,6 +28,9 @@
   button.primary:hover{background:#2857d8;border-color:#2857d8}
   button.primary:disabled{opacity:.6;cursor:default}
   button.mini{padding:4px 9px;font-size:12px;border-radius:7px}
+  .gh-link{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:8px;color:var(--ink-2);transition:.15s}
+  .gh-link:hover{background:#fafbfc;border-color:#d6dbe4;color:var(--ink)}
+  .gh-link svg{width:18px;height:18px;fill:currentColor;display:block}
   .banner{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:9px;
     padding:9px 13px;font-size:12.5px;margin-bottom:16px}
 
