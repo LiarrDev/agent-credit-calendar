@@ -160,6 +160,58 @@ eq("消耗后只剩 40", sameDay[0].remaining, 40);
 eq("同名同日的另一笔仍是 8", sameDay[1].remaining, 8);
 eq("只更新这一笔", m3.updated, 1);
 
+/* ---------- 权威清单（v0.3.24） ----------
+ * 真机故障（2026-11-09）：用户在其他设备消耗积分后，日历比后台多出 450。
+ * 接口响应本身完整且合计正确，差的是本地残留——用尽的包被接口整条摘掉
+ * （Status:[0] 只查有效包），而 WorkBuddy 没标 authoritative，缺席批次永远不关。
+ */
+eq("标了权威清单", D.get("workbuddy").authoritative, true);
+
+var dropped = JSON.parse(JSON.stringify(usedMore));   // 在消耗后的响应上摘包，别把 40 改回 100
+dropped.data.Accounts.splice(7, 1);   // 摘掉 500 那笔：模拟在其他设备花完后被平台摘掉
+var droppedBatches = D.runSync("workbuddy",
+  [Object.assign({}, capture, { bodyPreview: JSON.stringify(dropped) })], now).batches;
+eq("摘掉一笔后接口侧只剩 7 笔", droppedBatches.length, 7);
+
+var mNoAuth = N.mergeBatches(m3.batches, droppedBatches, { now: now });
+eq("不标权威时旧批次残留（反向验证旧行为）", mNoAuth.closed, 0);
+eq("残留批次只记缺席", mNoAuth.batches.filter(function (b) { return b.absentCount > 0; }).length, 1);
+
+var mAuth = N.mergeBatches(m3.batches, droppedBatches, { now: now, authoritative: { workbuddy: true } });
+eq("权威清单：缺席批次被关 1 笔", mAuth.closed, 1);
+var closedBatch = mAuth.batches.filter(function (b) { return b.closed; })[0];
+eq("关掉的是被摘掉的那笔（500）", closedBatch.remaining, 500);
+eq("历史不删、余额不再计入", mAuth.batches.length, 8);
+eq("活批次合计与接口一致（2674.45）", Math.abs(
+  mAuth.batches.filter(function (b) { return !b.closed; })
+    .reduce(function (s, b) { return s + b.remaining; }, 0) - 2674.45000016) < 1e-6, true);
+
+var manual = mAuth.batches.map(function (b) {
+  if (b !== closedBatch) return b;
+  var c = Object.assign({}, b, { manualEdited: true });
+  delete c.closed;
+  delete c.closedAt;
+  return c;
+});
+var mManual = N.mergeBatches(manual, droppedBatches, { now: now, authoritative: { workbuddy: true } });
+eq("手改过的缺席批次不自动关", mManual.closed, 0);
+
+var mBack = N.mergeBatches(mAuth.batches, m3.batches.map(function (b) { return Object.assign({}, b); }),
+  { now: now, authoritative: { workbuddy: true } });
+eq("平台再次返回时重新计入", mBack.reopened, 1);
+
+/* 另一条残留路径：周期滚动改了 CycleEndTime → label/dedupKey 变 → 旧键批次残留。
+   权威清单同样要能把它关掉，余额只算新键那笔。 */
+var rolled = JSON.parse(JSON.stringify(usedMore));
+rolled.data.Accounts[7].CycleEndTime = "2026-12-17 12:56:26";
+var mRoll = N.mergeBatches(m3.batches, D.runSync("workbuddy",
+  [Object.assign({}, capture, { bodyPreview: JSON.stringify(rolled) })], now).batches,
+  { now: now, authoritative: { workbuddy: true } });
+eq("周期滚动：旧键关掉、新键新增", [mRoll.closed, mRoll.added], [1, 1]);
+eq("周期滚动后合计不重复计（3174.45）", Math.abs(
+  mRoll.batches.filter(function (b) { return !b.closed; })
+    .reduce(function (s, b) { return s + b.remaining; }, 0) - 3174.45000016) < 1e-6, true);
+
 /* 接口层失败要说清楚，不能伪装成"没认出批次" */
 eq("401 明确说登录失效", /登录态失效/.test(D.runSync("workbuddy",
   [Object.assign({}, capture, { status: 401, bodyPreview: '{"message":"unauthorized"}' })], now).message), true);

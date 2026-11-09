@@ -339,7 +339,7 @@
    *   4. 这次没出现的批次 absentCount++，供 UI 提示"该平台已连续 N 次没返回这笔"。
    *      只在本次 incoming 覆盖到的 agent 内部计算；incoming 为空视为抓取失败，
    *      什么都不记——"抓不到"和"没有了"必须区分开。
-   *   5. opts.authoritative 里标了 true 的 agent（当前只有 LobsterAI）例外：它的
+   *   5. opts.authoritative 里标了 true 的 agent（LobsterAI / WorkBuddy）例外：它的
    *      额度接口一次性返回**当下全部**批次，没出现就是真的不在了（花完 / 被平台
    *      回收 / 被新的一笔替代）。这种批次标 closed=true，不删历史但不再计入余额。
    *      为什么必须这么做：平台把花完的批次直接从列表里摘掉（不是给 0），

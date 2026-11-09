@@ -18,7 +18,7 @@
  *     // 可选：已知接口的页面内直读配置（目前只有 Qoder）。
  *     // 有 direct 的平台不再注入钩子，background 会开同源页执行一次只读 GET。
  *     direct: { url, pageUrl, loginPath, method: "GET", headers, csrf, timezone },
- *     // 可选：这份响应是否枚举了该平台**当下的全部**批次（目前只有 LobsterAI）。
+ *     // 可选：这份响应是否枚举了该平台**当下的全部**批次（LobsterAI / WorkBuddy）。
  *     // 标了 authoritative 的平台，同步时"本次没出现"的批次会被关掉（closed），
  *     // 不再计入余额——因为它的接口是把花完的批次直接摘掉，而不是给 0。
  *     // 只对活读样本生效，粘贴的旧样本不会用这个口径去关批次。

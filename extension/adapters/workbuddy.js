@@ -206,7 +206,11 @@
     // 页面会同时请求套餐、账单、用量等接口；只认这份免费/赠送包明细。
     endpointHint: /\/billing\/meter\/get-user-resource-free-packages(?:[?#]|$)/i,
     extract: extract,
-    readFallback: readFallback
+    readFallback: readFallback,
+    // 这份响应枚举当下全部有效免费/赠送包（Status:[0]、PageSize 200、5 个包码全查）：
+    // 用尽/失效的包会被整条摘掉而不是给 0，没出现就是真的不在了。不标的话，
+    // 在其他设备花完的包会停在最后一次见到的余额上（2026-11-09 真机：日历比后台多 450）。
+    authoritative: true
   };
   root.CreditAdapters.register("workbuddy", adapter);
   if (typeof module !== "undefined" && module.exports) module.exports = adapter;

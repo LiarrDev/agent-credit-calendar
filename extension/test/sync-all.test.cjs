@@ -17,6 +17,11 @@
 var vm = require("vm"), fs = require("fs"), path = require("path");
 
 var ROOT = path.join(__dirname, "..");
+// 场景 4 要在 node 侧先造出「上次同步留下的批次」，复用真 adapter + normalize
+require(path.join(ROOT, "lib/normalize.js"));
+require(path.join(ROOT, "lib/agents.js"));
+require(path.join(ROOT, "adapters/index.js"));
+require(path.join(ROOT, "adapters/workbuddy.js"));
 var KEY = "credit-calendar-v1";
 var WB_PAGE = "https://www.workbuddy.cn/profile/plans-usage";
 var WB_API = "https://www.workbuddy.cn/billing/meter/get-user-resource-free-packages";
@@ -38,7 +43,7 @@ function wbAccount(i) {
     CycleCapacityRemainPrecise: String(100 + i),
     CycleCapacityUsedPrecise: String(400 - i),
     CycleStartTime: "2026-10-01 00:00:00",
-    CycleEndTime: "2026-11-01 00:00:00",
+    CycleEndTime: "2026-12-01 00:00:00",
     DeductionEndTime: "2035-01-01 00:00:00",
     ExpiredTime: "", Status: 0
   };
@@ -252,6 +257,31 @@ function main() {
         ok("失败回退：旧样本照常算出 2 笔批次", batches.length === 2, batches.length);
         ok("失败回退：hookActive 仍是 false", ext3.mem[KEY].agents.workbuddy.hookActive === false,
           ext3.mem[KEY].agents.workbuddy.hookActive);
+
+        console.log("--- 场景 4：WorkBuddy 权威清单——其他设备花完的包，同步后停止计入（v0.3.24）");
+        // 真机故障（2026-11-09）：日历比后台多出 450。接口响应完整，
+        // 差值是本地残留的被摘掉批次。这里走真实 syncAll → syncOne 接线：
+        // 上次同步留下 4 笔，这次活读只返回 3 笔，第 4 笔必须被 closed。
+        var prev = global.CreditAdapters.runSync("workbuddy", [{
+          agentId: "workbuddy", url: WB_API, status: 200, via: "direct",
+          at: "2026-11-01T00:00:00.000Z", bodyPreview: wbBody(4), truncated: false
+        }], new Date());
+        var seed4 = seedWith(false);
+        seed4.batches = prev.batches;
+        var ext4 = createExt(seed4);   // 活读只回 wbBody(3)：第 4 笔被平台摘掉
+        return ext4.sync().then(function (r4) {
+          var wb4 = resultOf(r4, "workbuddy");
+          var b4 = (ext4.mem[KEY].batches || []).filter(function (b) { return b.agent === "workbuddy"; });
+          var closed4 = b4.filter(function (b) { return b.closed; });
+          ok("权威清单：同步成功且读到了活数据", !!(wb4 && wb4.ok && wb4.fresh === true), wb4);
+          ok("权威清单：缺席的 1 笔被关", !!(wb4 && wb4.closed === 1), wb4);
+          ok("权威清单：历史不删（仍是 4 笔）", b4.length === 4, b4.length);
+          ok("权威清单：关掉的是被摘掉的那笔（remaining 104）",
+            closed4.length === 1 && closed4[0].remaining === 104, closed4);
+          var activeSum = b4.filter(function (b) { return !b.closed; })
+            .reduce(function (s, b) { return s + b.remaining; }, 0);
+          ok("权威清单：余额只算接口还在的 3 笔（306）", activeSum === 306, activeSum);
+        });
       });
     });
   });

@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v0.3.23**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
+> 状态：`extension/` **v0.3.24**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -14,6 +14,7 @@
 > v0.3.21 调高日历格子高度，每格直接显示 4 行到期数据（原 3 行，超出才折叠），并相应调高格子高度以容纳 4 行。
 > v0.3.22 顶部总览卡片点击平台名跳转到对应后台（Qoder / TRAE / WorkBuddy / LobsterAI 各平台额度页），平台名加可点击样式与 ↗ 角标。
 > v0.3.23 新增 GitHub 仓库入口：页脚「在 GitHub 查看源码 ↗」+ header 右上角 GitHub 图标，指向 github.com/LiarrDev/agent-credit-calendar。
+> v0.3.24 修 WorkBuddy 余额比后台多：在其他设备花完的包被接口摘掉后本地残留不消，给 WorkBuddy 也标上权威清单（决策 30）。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
@@ -611,6 +612,29 @@ free-packages 响应有 **约 130KB**，而 `sanitizeCapture` 的默认上限仍
     回归：新增 `sync-all` 17 条——未挂钩平台确实临时抓取且 `hookActive` 保持 false、
     钩子注册后又注销、常驻钩子平台结果不标 `ephemeral` 且保持 true、401 时保留未登录页并
     用旧样本算出 2 笔；`ui` +3（临时抓取提示写明「读完已注销」、按钮复位），共 **557 条**。
+
+30. **（v0.3.24）WorkBuddy 也是权威清单：在其他设备花完的包，同步后必须停止计入余额。**
+    用户报：WorkBuddy 后台看到的余额比日历少 450；前两天在其他设备登录消耗过积分。
+    拿用户提供的真实接口响应对账：`get-user-resource-free-packages` 返回 74 笔、
+    `CycleCapacityRemainPrecise` 合计与后台完全一致，走真实 adapter + normalize 管线
+    也算出同样的数——**接口与解析都没错，差的 450 是只存在于本地的残留批次**。
+    根因与决策 27 的 LobsterAI 完全同构：请求体只查 `Status:[0]` 的有效包，用尽/失效的包
+    被平台**整条摘掉**而不是给 0；WorkBuddy 没标 `authoritative`，缺席批次只记 `absentCount`、
+    旧余额永远计入总和，且每次同步都报「数字无变化」，无法自愈。
+    - **改法**：`adapters/workbuddy.js` 标 `authoritative: true`。该接口一次性枚举当下全部
+      有效免费/赠送包（`PageSize 200`、5 个包码全查），「没出现就是真不在了」的语义成立。
+      决策 27 的其余边界原样继承：不删历史（标 `closed`）、平台再次返回自动恢复、
+      手改批次不自动关、只对活读样本生效（粘贴的历史快照不关批次）。
+    - **与旧决策的冲突**：决策 27 写的是「当前只有 LobsterAI」，理由是怕部分返回的平台
+      被误关历史。这次真机偏差证明 WorkBuddy 的响应同样是全量清单，口径更新为
+      LobsterAI / WorkBuddy 两家；Qoder / TRAE 仍按缺席只记数，行为不变。
+    - **放弃的方案**：每次同步整体替换该平台批次（会丢历史与手改数据，违背决策 6）；
+      本地按消耗递减余额（扩展根本不知道其他设备的消耗，只能以接口为准）。
+    回归：`workbuddy` +12（权威声明、摘包后关闭/余额对账、不标时残留的反向验证、
+    手改不关、重新计入、周期滚动换键后旧关新加不重复计）、`sync-all` +5（场景 4：
+    真实 `syncAll → syncOne` 接线，4 笔残留 1 笔被关、余额 410 → 306），共 **800 条**。
+    反向验证：去掉 `authoritative` → 4 条红。另有 1 条 `ui` 失败（「每格最多三平台」）
+    在 v0.3.23 的 HEAD 上即存在，与本改动无关，另行排查。
 
 ## 8. 需要你提供 / 待确认
 
