@@ -570,6 +570,9 @@ booted(ui).then(function (ext) {
     Object.assign(expiryBatch("group-trae", day, day + "T14:06:00", "trae"), { remaining: 80 }),
     Object.assign(expiryBatch("group-lobster", day, day + "T15:07:00", "lobsterai"), { remaining: 90 }),
     Object.assign(expiryBatch("group-workbuddy", day, day + "T16:08:00", "workbuddy"), { remaining: 70 }),
+    // 第 5 个平台（手填批次可以是任意 agent）：v0.3.21 起每格显示 4 行，超出才折叠。
+    // 时刻已过，进历史不进「即将到期」，upcoming 断言不受影响。
+    Object.assign(expiryBatch("group-fifth", day, day + "T09:00:00", "other-platform"), { remaining: 60 }),
     Object.assign(expiryBatch("group-closed", day), { closed: true, remaining: 999 }),
     expiryBatch("group-tomorrow", "2026-10-24"),
     expiryBatch("group-past1", "2026-10-22"), expiryBatch("group-past2", "2026-10-22")
@@ -582,7 +585,11 @@ booted(ui).then(function (ext) {
     ok("平台内合计保留小数、排除已关闭批次", cell.includes("</b> 175.75</div>") && cell.includes("Qoder · 4 笔"));
     ok("不同平台不合并金额", cell.includes('data-agent="trae"') && cell.includes("</b> 80</div>")
       && cell.includes('data-agent="lobsterai"') && cell.includes("</b> 90</div>"));
-    ok("每格最多三平台，更多按平台数提示", (cell.match(/data-agent=/g) || []).length === 3 && cell.includes("+1 个平台，点开看"));
+    ok("每格最多四平台，更多按平台数提示", (cell.match(/data-agent=/g) || []).length === 4 && cell.includes("+1 个平台，点开看"));
+    ok("折叠时前四行按剩余量排序", (function () {
+      var order = Array.from(cell.matchAll(/data-agent="([^"]+)"/g), function (m) { return m[1]; });
+      return order.join(",") === "qoder,lobsterai,trae,workbuddy";
+    })());
     ok("不同日期不合并", tomorrow.includes("Qoder · 1 笔") && tomorrow.includes("</b> 100</div>"));
     ok("有效与过期混合组保持正常色", /class="e"[^>]*data-agent="qoder"/.test(cell));
     ok("全部已过期组降饱和且保留历史合计", /class="e dim"[^>]*data-agent="qoder"/.test(past) && past.includes("</b> 200</div>"));
@@ -594,15 +601,15 @@ booted(ui).then(function (ext) {
 
     clickDay(ext, day, true);
     var detail = ext.el("#detail").innerHTML;
-    ok("点击合并条进入当天逐笔明细", detail.includes("2026/10/23 到期明细") && rowIds(detail).length === 7);
+    ok("点击合并条进入当天逐笔明细", detail.includes("2026/10/23 到期明细") && rowIds(detail).length === 8);
     ok("日明细包含折叠的平台和历史过期批次", rowIds(detail).includes("group-workbuddy") && rowIds(detail).includes("group-expired")
       && detail.includes("已过期") && !rowIds(detail).includes("group-closed"));
-    ["13:05", "18:30", "10:00", "14:06", "15:07", "16:08"].forEach(function (hm) {
+    ["13:05", "18:30", "10:00", "14:06", "15:07", "16:08", "09:00"].forEach(function (hm) {
       ok("到期明细显示完整日期时分 " + hm, detail.includes(day + " " + hm + " 到期"));
     });
     ok("到期明细不伪造未知时分", detail.includes(day + "（具体时间未知） 到期"));
     clickDay(ext, day, true);
-    ok("再次点击合并条仍保持明细打开", rowIds(ext.el("#detail").innerHTML).length === 7);
+    ok("再次点击合并条仍保持明细打开", rowIds(ext.el("#detail").innerHTML).length === 8);
 
     var format = ext.ctx.CreditNormalize.formatExpiry;
     ext.ctx.CreditNormalize.formatExpiry = function () { return '<time datetime="x">&</time>'; };
@@ -613,7 +620,7 @@ booted(ui).then(function (ext) {
     ok("聚合后的逐笔明细仍能编辑指定批次", ext.el("#detail").innerHTML.includes('value="group-q2"')
       && ext.el("#detail").innerHTML.includes("实际清零时刻 2026-10-23 18:30"));
     clickAct(ext, "#detail", "close");
-    ok("关闭单笔编辑回到当天明细", rowIds(ext.el("#detail").innerHTML).length === 7);
+    ok("关闭单笔编辑回到当天明细", rowIds(ext.el("#detail").innerHTML).length === 8);
     clickBatch(ext, "#upcoming", "group-q1");
     ok("即将到期仍直接进入对应批次编辑", ext.el("#detail").innerHTML.includes('value="group-q1"'));
     clickDay(ext, day, false);
