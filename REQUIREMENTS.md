@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v0.3.24**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
+> 状态：`extension/` **v0.3.25**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -15,6 +15,7 @@
 > v0.3.22 顶部总览卡片点击平台名跳转到对应后台（Qoder / TRAE / WorkBuddy / LobsterAI 各平台额度页），平台名加可点击样式与 ↗ 角标。
 > v0.3.23 新增 GitHub 仓库入口：页脚「在 GitHub 查看源码 ↗」+ header 右上角 GitHub 图标，指向 github.com/LiarrDev/agent-credit-calendar。
 > v0.3.24 修 WorkBuddy 余额比后台多：在其他设备花完的包被接口摘掉后本地残留不消，给 WorkBuddy 也标上权威清单（决策 30）。
+> v0.3.25 右栏布局：把「到期明细」面板提到「即将到期」清单上方，点某天明细不必先滚过整条临期清单。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
