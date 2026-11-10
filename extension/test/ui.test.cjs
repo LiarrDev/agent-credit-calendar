@@ -602,6 +602,12 @@ booted(ui).then(function (ext) {
     clickDay(ext, day, true);
     var detail = ext.el("#detail").innerHTML;
     ok("点击合并条进入当天逐笔明细", detail.includes("2026/10/23 到期明细") && rowIds(detail).length === 8);
+    ok("到期明细按精确时刻先后排序（未知时刻排日末，不按剩余量）", (function () {
+      return rowIds(detail).join(",") === [
+        "group-fifth", "group-expired", "group-q1", "group-trae",
+        "group-lobster", "group-workbuddy", "group-q2", "group-unknown"
+      ].join(",");
+    })(), rowIds(detail));
     ok("日明细包含折叠的平台和历史过期批次", rowIds(detail).includes("group-workbuddy") && rowIds(detail).includes("group-expired")
       && detail.includes("已过期") && !rowIds(detail).includes("group-closed"));
     ["13:05", "18:30", "10:00", "14:06", "15:07", "16:08", "09:00"].forEach(function (hm) {

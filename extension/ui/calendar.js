@@ -150,8 +150,10 @@
     return null;
   }
   function expiringOn(dayStr) {
+    // 同一天里按精确到期时刻先后排（未知时刻靠日末），与「即将到期」用同一把尺子：
+    // 这两个列表说的是同一件事，顺序不该有两套解释。剩余量不参与排序。
     return doc.batches.filter(function (b) { return !isGone(b) && b.expiresAt === dayStr; })
-      .sort(function (a, c) { return c.remaining - a.remaining; });
+      .sort(compareExpiry);
   }
   function compareExpiry(a, c) {
     var days = N.daysLeft(a.expiresAt, TODAY) - N.daysLeft(c.expiresAt, TODAY);
