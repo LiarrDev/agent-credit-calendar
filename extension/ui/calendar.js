@@ -85,8 +85,10 @@
     Store.load().then(function (d) {
       doc = d;
       var u = doc.ui || {};
-      view = u.view || [TODAY.getFullYear(), TODAY.getMonth()];
-      sel = u.sel || null; edit = u.edit || null; wasted = u.wasted || null;
+      // 每次打开都落在今天：sel/view 不从存储恢复，免得一打开还停在上次点的日期。
+      // edit / wasted 仍按存储恢复，正在编辑的批次和已用尽标记不因隔天打开而丢失。
+      view = [TODAY.getFullYear(), TODAY.getMonth()];
+      sel = N.ymd(TODAY); edit = u.edit || null; wasted = u.wasted || null;
       render();
     });
   }

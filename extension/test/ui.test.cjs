@@ -536,6 +536,15 @@ booted(ui).then(function (ext) {
     ok("空列表文案使用 3 天", ext.el("#upcoming").innerHTML.includes("未来 3 天内无积分到期"));
   });
 }).then(function () {
+  /* 上次停在 9 月 15 日：再次打开应回到今天，而不是恢复旧选中日期 */
+  var seed = seedDoc();
+  seed.ui = { sel: "2026-09-15", view: [2026, 8] };
+  return booted(createUi(seed, "2026-10-23T12:00:00")).then(function (ext) {
+    var grid = ext.el("#grid").innerHTML;
+    ok("打开时默认选中今天", /class="cell[^"]*sel[^"]*" data-day="2026-10-23"/.test(grid), grid.slice(0, 120));
+    ok("打开时月份回到今天所在月", grid.includes('data-day="2026-10-01"'), ext.mem[KEY].ui);
+  });
+}).then(function () {
   var seed = seedDoc(2);
   delete seed.settings.threshold;
   seed.batches = ["2026-10-23", "2026-10-26", "2026-10-27", "2026-10-30", "2026-11-06", "2026-11-22"].map(function (day, i) {
