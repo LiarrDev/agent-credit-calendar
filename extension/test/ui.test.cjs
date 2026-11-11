@@ -58,6 +58,7 @@ function createChrome(mem, onChanged) {
     runtime: {
       id: "test", lastError: null,
       getURL: function (p) { return "chrome-extension://test/" + p; },
+      getManifest: function () { return { version: "0.0.0-test" }; },
       sendMessage: function () {}
     },
     storage: {
@@ -187,6 +188,8 @@ booted(ui).then(function (ext) {
   ok("页脚有清空入口", foot.indexOf("清空本机数据") >= 0);
   ok("页脚有导入入口", foot.indexOf("导入备份") >= 0);
   ok("页脚有隐藏的文件输入", foot.indexOf('type="file"') >= 0);
+  ok("标题下显示当前版本号（读 manifest，不另存常量）",
+    ext.el("#modeTag").textContent.indexOf("v0.0.0-test") >= 0, ext.el("#modeTag").textContent);
 
   /* ---------- 2. 清空：两段式确认 ---------- */
   var wipe = ext.el("#wipe");

@@ -10,6 +10,8 @@
 
   var N = CreditNormalize, Store = CreditStore, AG = CreditAgents;
   var IS_EXT = Store.hasChrome && typeof chrome !== "undefined" && !!chrome.runtime;
+  /* 版本号直接读 manifest：发版只改 manifest.json 一处，界面不会和扩展版本走散。 */
+  var VER = IS_EXT && chrome.runtime.getManifest ? chrome.runtime.getManifest().version : "";
   var TODAY = N.startOfDay(new Date());
 
   var doc = null;
@@ -991,9 +993,10 @@
           { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
         + "<br>" + (stale ? "<b>已超过 " + doc.settings.staleDays + " 天未同步，数字可能过时</b>" : "同步于 " + ago(doc.lastSyncAt))
       : "尚未同步过<br>可先手动录入";
-    $("#modeTag").textContent = IS_EXT
+    var mode = IS_EXT
       ? "浏览器扩展 · 数据存在本机 chrome.storage.local"
       : "file:// 预览模式 · 数据存在本机 localStorage";
+    $("#modeTag").textContent = VER ? mode + " · v" + VER : mode;
   }
 
   /* ---------- 页脚：备份、恢复与清空 ---------- */
