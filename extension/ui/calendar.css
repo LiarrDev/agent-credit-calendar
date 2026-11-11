@@ -49,6 +49,11 @@
   .chip.b{background:#ecfdf5;border-color:#bbf7d0;color:#047857}
   .chip.h{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
   .chip.m{background:#fef3c7;border-color:#fde68a;color:#92400e}
+  .card-acts{display:flex;align-items:center;gap:6px}
+  .card-refresh{width:23px;height:23px;padding:0;border-radius:6px;font-size:13px;line-height:1;
+    display:inline-flex;align-items:center;justify-content:center;color:var(--ink-3)}
+  .card-refresh:hover{color:var(--today);border-color:#c7d2fe;background:#f8faff}
+  .card-refresh:disabled{opacity:.5;cursor:default;background:#fff}
   .balance{font-size:23px;font-weight:660;letter-spacing:-.4px;line-height:1.15}
   .balance .u{font-size:12px;font-weight:500;color:var(--ink-3);margin-left:4px}
   .next{margin-top:7px;font-size:12.5px;color:var(--ink-2)}

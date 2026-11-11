@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v0.3.29**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
+> 状态：`extension/` **v0.3.30**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -20,6 +20,7 @@
 > v0.3.27 修样本库满时 TRAE 目标接口样本被别家平台历史快照挤掉：同 (平台, 接口) 只保护最新一条、旧快照先淘汰；选不到目标接口改报 no-target 并说清手上只有哪个接口。
 > v0.3.28 标题下模式说明显示当前扩展版本号，版本直接读 manifest.json，不再需要单独维护界面常量。
 > v0.3.29 每次打开默认选中今天，不再恢复上次选中的日期与月份；编辑中的批次和已用尽标记仍按存储恢复。
+> v0.3.30 平台卡片右上角加刷新按钮，与授权面板的「刷新余额」共用 refreshAgent()；忙碌时按钮变「…」并禁用，防连点。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）

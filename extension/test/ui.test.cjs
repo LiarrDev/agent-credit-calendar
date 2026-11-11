@@ -191,6 +191,24 @@ booted(ui).then(function (ext) {
   ok("标题下显示当前版本号（读 manifest，不另存常量）",
     ext.el("#modeTag").textContent.indexOf("v0.0.0-test") >= 0, ext.el("#modeTag").textContent);
 
+  /* ---------- 1.1 卡片上的刷新按钮：不用先开授权面板 ---------- */
+  var sent = [];
+  ext.ctx.chrome.runtime.sendMessage = function (msg, cb) {
+    sent.push(msg);
+    if (cb) cb({ ok: false, busy: true, error: "上一次刷新还没结束" });
+  };
+  ok("每个平台卡片都有刷新按钮",
+    (ext.el("#cards").innerHTML.match(/data-act="refresh"/g) || []).length === 4,
+    ext.el("#cards").innerHTML.slice(0, 100));
+  var rbtn = { getAttribute: function (n) { return n === "data-id" ? "trae" : null; } };
+  ext.el("#cards").onclick({ target: { closest: function (s) {
+    return s === '[data-act="refresh"]' ? rbtn : null;
+  } } });
+  ok("点卡片刷新直接请求该平台",
+    sent.length === 1 && sent[0].type === "REFRESH_CAPTURES" && sent[0].agentId === "trae", sent);
+  ok("钩子未驻留的卡片按临时抓取请求（ephemeral）",
+    sent.length === 1 && sent[0].ephemeral === true, sent[0]);
+
   /* ---------- 2. 清空：两段式确认 ---------- */
   var wipe = ext.el("#wipe");
   var before = ext.deletes.length;

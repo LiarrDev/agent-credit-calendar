@@ -249,7 +249,12 @@
       return '<div class="card" style="--c:' + colorOf(s.agent) + '">'
         + '<div class="card-head"><span class="agent-name" data-act="console" data-agent="' + s.agent + '" title="打开 ' + esc(s.name) + ' 后台">'
           + esc(s.name) + '<span class="ext" aria-hidden="true">↗</span></span>'
-        + '<span class="chip ' + m[1] + '">' + m[0] + "</span></div>"
+        + '<span class="card-acts">'
+        + (IS_EXT
+          ? '<button type="button" class="card-refresh" data-act="refresh" data-id="' + s.agent
+            + '" title="刷新 ' + esc(s.name) + ' 余额" aria-label="刷新 ' + esc(s.name) + ' 余额">↻</button>'
+          : "")
+        + '<span class="chip ' + m[1] + '">' + m[0] + "</span></span></div>"
         + (s.count
           ? '<div class="balance">' + fmt(s.unit, s.total) + '<span class="u">' + unitLabel(s.unit) + " 可用</span></div>"
           : '<div class="balance" style="color:var(--ink-3)">0<span class="u">' + unitLabel(s.unit) + "</span></div>")
@@ -1136,6 +1141,8 @@
   /* ---------- 事件 ---------- */
 
   $("#cards").addEventListener("click", function (e) {
+    var rf = e.target.closest('[data-act="refresh"]');
+    if (rf) { refreshAgent(rf.getAttribute("data-id")); return; }
     var cn = e.target.closest('[data-act="console"]');
     if (cn) { openConsole(cn.getAttribute("data-agent")); return; }
     var w = e.target.closest('[data-act="wasted"]');
@@ -1432,89 +1439,7 @@
     if (act === "reauth") {
       var url = $('[data-url="' + id + '"]').value.trim();
       if (!url) { toast("先填后台地址"); return; }
-      var isDirect = !!AG.byId(id).direct;
-      /* 钩子已解除的平台，点「刷新余额」只能临时装一次：
-       * 开隐藏页 → 等响应 → 关页 → 立刻注销。装钩子这件事有风险，所以只在用户
-       * 亲手点这一下时发生，绝不自动、也不留在页面上。
-       * 直读平台没有钩子，直接页面内请求，不存在这个风险窗口。 */
-      var ephemeral = !isDirect && !doc.agents[id].hookActive;
-      if (ephemeral) toast("该平台钩子已解除，这次只临时装一下：开页 → 截一次 → 立刻注销（隐藏页失败会自动改用可见页重试，可能抢一次焦点）");
-      if (isDirect) toast("正在你的 Qoder 页面里刷新余额…");
-      // 刷新期间把按钮禁掉：后台有互斥，但用户看不出「为什么第二次没反应」，
-      // 而连点本身会踩坏探针和 hookActive（见 background 里 refreshing 的注释）。
-      busyReauth(id, true);
-      chrome.runtime.sendMessage({ type: "REFRESH_CAPTURES", agentId: id, ephemeral: ephemeral }, function (r) {
-        busyReauth(id, false);
-        if (chrome.runtime.lastError) { toast("后台没响应：" + chrome.runtime.lastError.message); return; }
-        if (!r) { toast("后台没回话"); return; }
-        if (r.busy) { toast(r.error || "上一次刷新还没结束"); return; }
-        if (r.ok) {
-          if (r.mode === "hidden-send" && r.fallback && r.fallback.ok) {
-            // v0.3.18：代发优先平台的常规成功路径——隐藏页里直接读，不等页面自己发。
-            // 必须说出来，不然用户会以为数字是从页面缓存里读的。
-            toast("已在后台页面里直接读取余额（HTTP " + r.fallback.status + "，"
-              + (r.fallback.bytes || 0) + " 字节"
-              + (r.fallback.duplicate ? "，和上次逐字节相同，数字没变" : "") + "）");
-          } else if (r.fallback && r.fallback.ok) {
-            // v0.3.14：页面自己一次额度接口都没发，扩展在页面上下文里代发成功。
-            // 这件事必须说出来——不然用户会以为数字是从页面缓存里读的。
-            toast("页面这次没自己请求额度接口，扩展在你的页面里代发了一次（HTTP "
-              + r.fallback.status + "，"
-              + (r.fallback.duplicate ? "和上次逐字节相同，余额没变" : "已存为新样本") + "）");
-          } else if (isDirect) {
-            toast(r.changed ? "已读取最新余额（有更新）" : "已读取最新余额（和上次一样，数字没变）");
-          } else {
-            toast(r.changed
-              ? (ephemeral ? "已截到新响应，钩子已注销" : "已截到新响应")
-              : (r.upgraded ? "后台页有响应：之前截断的旧样本已替换为完整响应"
-              : "后台页有响应，但内容和上次一样（数字确实没变）"));
-          }
-          // 截获之后后台已经顺手对该平台跑了一次同步，把批次变化说出来，
-          // 否则用户只知道"截到了"，不知道日历到底动没动。
-          var s = r.sync;
-          if (s && s.ok) {
-            // 「数字无变化」这句话得说准：以前只比 added/updated，于是"平台把花完的批次
-            // 摘掉了、余额其实降了 131"这种最需要说清楚的情况，反而报成"没变"。
-            // 现在把 closed/reopened 一起算进结论，并且明说到底剔掉了多少笔。
-            var bits = "新增 " + s.added + "/更新 " + s.updated;
-            if (s.conflicts) bits += "，" + s.conflicts + " 笔待裁决";
-            if (s.closed) bits += "，" + s.closed + " 笔后台已不再返回（不计入余额）";
-            if (s.reopened) bits += "，" + s.reopened + " 笔重新计入";
-            if (!s.added && !s.updated && !s.conflicts && !s.closed && !s.reopened) {
-              bits += "（数字无变化）";
-            }
-            toast("日历已更新：" + id + " " + bits);
-          } else if (s) {
-            toast("样本读到了，但没能算进日历：" + (s.message || s.reason));
-          }
-        } else {
-          // 失败时不许只说"没读到"：探针已经把断点定位出来了，直接讲人话
-          toast(r.error || r.diagnosis || "没读到数据");
-          var p = r.probe;
-          if (p && p.mode === "direct") {
-            toast("诊断：接口 " + (p.endpoint || "?") + " · HTTP " + (p.httpStatus || "无")
-              + " · 响应 " + (p.bodyBytes || 0) + " 字节"
-              + " · 开页尝试 " + (p.attempts || []).map(function (x) {
-                  return (x.visible ? "可见页" : "隐藏页") + "/" + (x.tabStatus || "?");
-                }).join("，")
-              + "。点「读取诊断」看完整记录");
-          } else if (p) {
-            toast("诊断细节：钩子" + (p.hookAt ? "已注入" : "没注入")
-              + " · 页面发出 " + p.responses + " 个响应"
-              + " · 像积分接口的 " + p.candidates + " 个"
-              + " · 入库 " + p.stored + " · 判重 " + p.dups
-              + " · 尝试了 " + p.attempts.length + " 次（" +
-              p.attempts.map(function (x) { return (x.visible ? "可见页" : "隐藏页") + "/" + (x.tabStatus || "?"); }).join("，") + "）"
-              + "。点「截获诊断」看完整记录");
-          }
-          if (r.tabLeftOpen) {
-            toast(isDirect || r.needLogin
-              ? "登录页给你留在前台了：登录后回来再点「刷新余额」"
-              : "那个标签页给你留着没关（钩子已注销），看一眼它是登录态还是空页面");
-          }
-        }
-        Store.load().then(function (d) { doc = d; renderAuth(); render(); });
-      });
+      refreshAgent(id);
       return;
     }
   });
@@ -1543,6 +1468,106 @@
     $$('[data-act="reauth"][data-id="' + id + '"]').forEach(function (b) {
       b.disabled = !!on;
       b.textContent = on ? "刷新中…" : "刷新余额";
+    });
+  }
+  /** 卡片上的刷新按钮只有图标，忙碌时换成「…」；重绘后自然回到 ↻。 */
+  function busyCard(id, on) {
+    $$('[data-act="refresh"][data-id="' + id + '"]').forEach(function (b) {
+      b.disabled = !!on;
+      b.textContent = on ? "…" : "↻";
+    });
+  }
+
+  /**
+   * 「刷新余额」的唯一实现：卡片按钮和授权面板共用，区别只在面板会先校验输入框。
+   * 直读平台在页面内发一次只读请求；其余平台若钩子已解除，则临时装钩子、读完立刻注销。
+   */
+  function refreshAgent(id) {
+    if (!IS_EXT) { toast("预览模式不能刷新余额，装成扩展后可用"); return; }
+    var ag = AG.byId(id), st = doc.agents[id];
+    if (!ag || !st) return;
+    var isDirect = !!ag.direct;
+    /* 钩子已解除的平台，点「刷新余额」只能临时装一次：
+     * 开隐藏页 → 等响应 → 关页 → 立刻注销。装钩子这件事有风险，所以只在用户
+     * 亲手点这一下时发生，绝不自动、也不留在页面上。
+     * 直读平台没有钩子，直接页面内请求，不存在这个风险窗口。 */
+    var ephemeral = !isDirect && !st.hookActive;
+    if (ephemeral) toast("该平台钩子已解除，这次只临时装一下：开页 → 截一次 → 立刻注销（隐藏页失败会自动改用可见页重试，可能抢一次焦点）");
+    if (isDirect) toast("正在你的 Qoder 页面里刷新余额…");
+    // 刷新期间把按钮禁掉：后台有互斥，但用户看不出「为什么第二次没反应」，
+    // 而连点本身会踩坏探针和 hookActive（见 background 里 refreshing 的注释）。
+    busyReauth(id, true); busyCard(id, true);
+    chrome.runtime.sendMessage({ type: "REFRESH_CAPTURES", agentId: id, ephemeral: ephemeral }, function (r) {
+      busyReauth(id, false); busyCard(id, false);
+      if (chrome.runtime.lastError) { toast("后台没响应：" + chrome.runtime.lastError.message); return; }
+      if (!r) { toast("后台没回话"); return; }
+      if (r.busy) { toast(r.error || "上一次刷新还没结束"); return; }
+      if (r.ok) {
+        if (r.mode === "hidden-send" && r.fallback && r.fallback.ok) {
+          // v0.3.18：代发优先平台的常规成功路径——隐藏页里直接读，不等页面自己发。
+          // 必须说出来，不然用户会以为数字是从页面缓存里读的。
+          toast("已在后台页面里直接读取余额（HTTP " + r.fallback.status + "，"
+            + (r.fallback.bytes || 0) + " 字节"
+            + (r.fallback.duplicate ? "，和上次逐字节相同，数字没变" : "") + "）");
+        } else if (r.fallback && r.fallback.ok) {
+          // v0.3.14：页面自己一次额度接口都没发，扩展在页面上下文里代发成功。
+          // 这件事必须说出来——不然用户会以为数字是从页面缓存里读的。
+          toast("页面这次没自己请求额度接口，扩展在你的页面里代发了一次（HTTP "
+            + r.fallback.status + "，"
+            + (r.fallback.duplicate ? "和上次逐字节相同，余额没变" : "已存为新样本") + "）");
+        } else if (isDirect) {
+          toast(r.changed ? "已读取最新余额（有更新）" : "已读取最新余额（和上次一样，数字没变）");
+        } else {
+          toast(r.changed
+            ? (ephemeral ? "已截到新响应，钩子已注销" : "已截到新响应")
+            : (r.upgraded ? "后台页有响应：之前截断的旧样本已替换为完整响应"
+            : "后台页有响应，但内容和上次一样（数字确实没变）"));
+        }
+        // 截获之后后台已经顺手对该平台跑了一次同步，把批次变化说出来，
+        // 否则用户只知道"截到了"，不知道日历到底动没动。
+        var s = r.sync;
+        if (s && s.ok) {
+          // 「数字无变化」这句话得说准：以前只比 added/updated，于是"平台把花完的批次
+          // 摘掉了、余额其实降了 131"这种最需要说清楚的情况，反而报成"没变"。
+          // 现在把 closed/reopened 一起算进结论，并且明说到底剔掉了多少笔。
+          var bits = "新增 " + s.added + "/更新 " + s.updated;
+          if (s.conflicts) bits += "，" + s.conflicts + " 笔待裁决";
+          if (s.closed) bits += "，" + s.closed + " 笔后台已不再返回（不计入余额）";
+          if (s.reopened) bits += "，" + s.reopened + " 笔重新计入";
+          if (!s.added && !s.updated && !s.conflicts && !s.closed && !s.reopened) {
+            bits += "（数字无变化）";
+          }
+          toast("日历已更新：" + id + " " + bits);
+        } else if (s) {
+          toast("样本读到了，但没能算进日历：" + (s.message || s.reason));
+        }
+      } else {
+        // 失败时不许只说"没读到"：探针已经把断点定位出来了，直接讲人话
+        toast(r.error || r.diagnosis || "没读到数据");
+        var p = r.probe;
+        if (p && p.mode === "direct") {
+          toast("诊断：接口 " + (p.endpoint || "?") + " · HTTP " + (p.httpStatus || "无")
+            + " · 响应 " + (p.bodyBytes || 0) + " 字节"
+            + " · 开页尝试 " + (p.attempts || []).map(function (x) {
+                return (x.visible ? "可见页" : "隐藏页") + "/" + (x.tabStatus || "?");
+              }).join("，")
+            + "。点「读取诊断」看完整记录");
+        } else if (p) {
+          toast("诊断细节：钩子" + (p.hookAt ? "已注入" : "没注入")
+            + " · 页面发出 " + p.responses + " 个响应"
+            + " · 像积分接口的 " + p.candidates + " 个"
+            + " · 入库 " + p.stored + " · 判重 " + p.dups
+            + " · 尝试了 " + p.attempts.length + " 次（" +
+            p.attempts.map(function (x) { return (x.visible ? "可见页" : "隐藏页") + "/" + (x.tabStatus || "?"); }).join("，") + "）"
+            + "。点「截获诊断」看完整记录");
+        }
+        if (r.tabLeftOpen) {
+          toast(isDirect || r.needLogin
+            ? "登录页给你留在前台了：登录后回来再点「刷新余额」"
+            : "那个标签页给你留着没关（钩子已注销），看一眼它是登录态还是空页面");
+        }
+      }
+      Store.load().then(function (d) { doc = d; renderAuth(); render(); });
     });
   }
 
