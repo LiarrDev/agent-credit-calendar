@@ -112,6 +112,17 @@
       // 截断的样本很可能让 JSON.parse 直接失败，先说清楚，别让人以为平台没数据
       return { ok: false, reason: "truncated", message: "样本被截断了，去授权面板点「刷新余额」再截一次" };
     }
+    // 有接口提示却选中了别的接口，说明目标接口的样本根本不在库里（多是被样本
+    // 上限挤掉的，见 background.js 的 captureRank）。这时再说「没认出批次」会把
+    // 人引向接口改版，必须说清手上只有哪个接口。
+    var ad = get(agentId);
+    if (ad.endpointHint && !ad.endpointHint.test(String(capture.url || ""))) {
+      return {
+        ok: false, reason: "no-target",
+        message: "样本库里只有 " + String(capture.url || "").slice(0, 120)
+          + "，没有额度接口的样本；去「授权与样本」再点一次「刷新余额」"
+      };
+    }
 
     var rows;
     try {

@@ -501,6 +501,7 @@ function storeCapture(agentId, entry, p) {
     } else {
       if (p) p.stored++;
       list.push(clean);
+      var newestByPair = newestOfEachUrl(list);
       while (list.length > MAX_CAPTURES) {
         // 超上限时丢「最没用」的那个：各平台先保护自己 adapter 指定的接口，
         // 再比分数。否则一个页面顺带发的十几个高分响应会把真正的接口样本挤出去。
@@ -509,7 +510,7 @@ function storeCapture(agentId, entry, p) {
         var worst = -1;
         for (var j = 0; j < list.length; j++) {
           if (list[j] === clean) continue;
-          if (worst < 0 || captureRank(list[j]) < captureRank(list[worst])) worst = j;
+          if (worst < 0 || captureRank(list[j], newestByPair) < captureRank(list[worst], newestByPair)) worst = j;
         }
         if (worst < 0) break;   // 库里只有这一条，无从淘汰（防御性，正常不会走到）
         list.splice(worst, 1);
@@ -664,13 +665,33 @@ function settleAuthCapture(agentId, abs, entry, stored) {
   });
 }
 
-/** 样本淘汰排序：匹配该平台 adapter 接口提示的样本 +1000，其余再比分数。 */
-function captureRank(c) {
+/**
+ * 样本淘汰排序：匹配该平台 adapter 接口提示的样本 +1000，其余再比分数。
+ *
+ * 同一个 (平台, 接口) 只保护最新的一条，旧快照再 -1000：同步永远只取最新的
+ * 那条样本（pickCapture 同 URL 按时间倒序），旧响应没有任何用处，但它们的
+ * rank 和别家目标样本几乎一样高。v0.3.26 真机就是这样丢的：WorkBuddy /
+ * LobsterAI 各堆了三十来条历史快照占满 60 条名额，TRAE 刷新时目标接口样本
+ * rank 1008，比那 59 条 1009 都低，入库后立刻被挤掉，syncOne 只看到最后入库
+ * 的 expired_ents，报「adapter 没从这份样本里认出批次」。
+ */
+function captureRank(c, newestByPair) {
   if (!c) return -1;
   var ad = CreditAdapters.get(c.agentId);
   var hint = ad && ad.endpointHint;
-  var bonus = hint && hint.test(String(c.url || "")) ? 1000 : 0;
-  return bonus + (c.score || 0);
+  var rank = hint && hint.test(String(c.url || "")) ? 1000 : 0;
+  if (newestByPair && newestByPair[c.agentId + "|" + c.url] !== c) rank -= 1000;
+  return rank + (c.score || 0);
+}
+
+/** 每个 (平台, 接口) 的最新样本；淘汰时保护它、先丢同接口的旧快照。 */
+function newestOfEachUrl(list) {
+  var map = {};
+  (list || []).forEach(function (c) {
+    var pair = c.agentId + "|" + c.url;
+    if (!map[pair] || String(c.at || "") > String(map[pair].at || "")) map[pair] = c;
+  });
+  return map;
 }
 
 function absolutize(url, pageUrl) {

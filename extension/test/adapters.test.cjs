@@ -73,7 +73,13 @@ eq("同一接口取最新，哪怕分数更低", D.pickCapture(sameUrlCaps, "qod
 
 /* runSync 走通：样本 -> 批次 */
 var r = D.runSync("qoder", caps, new Date(2026, 9, 21));
-eq("选中那条没认出批次就说 no-rows", r.reason, "no-rows");
+eq("选中那条不是目标接口就说 no-target", r.reason, "no-target");
+eq("no-target 说清手上只有哪个接口", /same-score-later/.test(r.message), true);
+
+/* 目标接口的样本在、但字段认不出：仍是 no-rows（接口改版的信号，别混成选错样本） */
+eq("目标接口样本认不出批次报 no-rows", D.runSync("qoder",
+  [{ agentId: "qoder", score: 5, url: "https://api/q/credit", bodyPreview: '{"data":{"balances":[]}}' }],
+  new Date(2026, 9, 21)).reason, "no-rows");
 
 var good = [{ agentId: "qoder", score: 9, at: "2026-10-21T00:00:00Z", url: "https://api/q/credit",
   bodyPreview: caps[1].bodyPreview }];
@@ -88,7 +94,7 @@ eq("单位默认 credits", ok.batches[0].unit, "credits");
 eq("截断样本明确报截断", D.runSync("qoder", [Object.assign({}, good[0], { truncated: true })], new Date(2026, 9, 21)).reason, "truncated");
 eq("有 adapter 但没样本 -> no-capture", D.runSync("qoder", [{ agentId: "trae", score: 9, url: "u", bodyPreview: "{}" }], new Date(2026, 9, 21)).reason, "no-capture");
 eq("没注册 adapter 优先报这个", D.runSync("trae", good, new Date(2026, 9, 21)).reason, "no-adapter");
-eq("adapter 抛异常不吞掉", D.runSync("qoder", [{ agentId: "qoder", score: 9, url: "u", bodyPreview: "not json" }], new Date(2026, 9, 21)).reason, "adapter-threw");
+eq("adapter 抛异常不吞掉", D.runSync("qoder", [{ agentId: "qoder", score: 9, url: "https://api/q/credit", bodyPreview: "not json" }], new Date(2026, 9, 21)).reason, "adapter-threw");
 
 /* 批次再喂给 mergeBatches，整条链路才闭合 */
 var m = N.mergeBatches([], ok.batches, { now: new Date(2026, 9, 21) });

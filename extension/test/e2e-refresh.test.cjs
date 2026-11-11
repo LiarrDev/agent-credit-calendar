@@ -308,6 +308,9 @@ function runRefresh(dropOnChanged, fastWait, scriptResults) {
     console.log("--- 场景 8：后台不再返回的批次必须从余额里剔掉（v0.3.17）");
     return goneChecks();
   }).then(function () {
+    console.log("--- 场景 9：库满时别家平台的历史快照不能挤掉目标样本（v0.3.27）");
+    return retentionChecks();
+  }).then(function () {
     console.log("\n" + pass + " passed, " + fail + " failed");
     process.exit(fail ? 1 : 0);
   }, function (e) {
@@ -643,5 +646,74 @@ function goneChecks() {
     return sync();
   }).then(function (r) {
     ok("绑定：粘贴样本不按权威口径关批次", r && r.closed === 0, r && r.closed);
+  });
+}
+
+/**
+ * 场景 9：样本库满时，别家平台的旧快照不能把 TRAE 的目标样本挤掉。
+ *
+ * 真机 v0.3.26：库里 60 条 = WorkBuddy 34 + LobsterAI 25 + TRAE 1，两家都命中
+ * 各自 hint（rank 1009）；TRAE 目标样本 rank 1008，比谁都低。刷新时 TRAE 一连
+ * 入库十几条响应，每条都触发淘汰，目标样本刚入库就被挤掉，syncOne 只看到最后
+ * 入库的 expired_ents，报「adapter 没从这份样本里认出批次」——而目标接口其实
+ * 刚返回过 200 / 16802 字节。修法见 captureRank：同 (平台, 接口) 只保护最新
+ * 那条，旧快照先淘汰。
+ */
+function retentionChecks() {
+  var ext = createExt(false, true);
+  var ctx = ext.ctx;
+  var TARGET = "https://api.trae.cn/trae/api/v2/pay/user_current_entitlement_list";
+  var EXPIRED = "https://api.trae.cn/trae/api/v2/pay/expired_ents";
+  var WB = "https://www.workbuddy.cn/billing/meter/get-user-resource-free-packages";
+  var LOB = "https://lobsterai-server.youdao.com/api/user/profile-summary";
+  var PAGE_TRAE = "https://www.trae.cn/dashboard";
+
+  // 填满 60 条：34 条 WorkBuddy + 26 条 LobsterAI，全部命中各自的接口提示。
+  var caps = [];
+  var i;
+  for (i = 0; i < 34; i++) {
+    caps.push({ agentId: "workbuddy", url: WB, method: "GET", status: 200, score: 9,
+      at: "2026-11-0" + (1 + (i % 9)) + "T0" + (i % 10) + ":00:00.000Z", bodyPreview: "{}", bodyLength: 2 });
+  }
+  for (i = 0; i < 26; i++) {
+    caps.push({ agentId: "lobsterai", url: LOB, method: "GET", status: 200, score: 9,
+      at: "2026-11-0" + (1 + (i % 9)) + "T1" + (i % 10) + ":00:00.000Z", bodyPreview: "{}", bodyLength: 2 });
+  }
+
+  var endSec = Math.floor(Date.UTC(2026, 11, 1) / 1000);
+  function targetBody() {
+    return JSON.stringify({
+      is_credits_billing: true,
+      usage_summary: { total_amount: 30000, consumed_amount: 12000 },
+      user_entitlement_pack_list: [{
+        display_desc: "Monthly Speed Points", group_name: "monthly", expire_time: endSec,
+        entitlement_base_info: {
+          end_time: endSec, quota: { credits_limit: 30000 },
+          product_extra: { package_extra: { package_name: "Pro", quota: { credits_limit: 30000 } } }
+        },
+        usage: { credits_amount: 12000 }
+      }]
+    });
+  }
+  var expiredBody = JSON.stringify({ expired_ent_list: [], credits_limit: 30000 });
+
+  return ctx.CreditStore.update(function (d) { d.captures = caps; }).then(function () {
+    return ctx.storeCapture("trae", { url: TARGET, method: "GET", status: 200,
+      body: targetBody(), pageUrl: PAGE_TRAE, requestHeaderNames: [] }, null);
+  }).then(function () {
+    // 目标样本之后又入库一条别的接口响应：这一步在旧逻辑里正好把目标样本挤掉。
+    return ctx.storeCapture("trae", { url: EXPIRED, method: "GET", status: 200,
+      body: expiredBody, pageUrl: PAGE_TRAE, requestHeaderNames: [] }, null);
+  }).then(function () {
+    var list = ext.mem[KEY].captures || [];
+    ok("容量：仍然限制在 60 条", list.length === 60, list.length);
+    ok("容量：TRAE 目标接口样本没有被挤掉",
+      list.some(function (c) { return c.agentId === "trae" && c.url === TARGET; }),
+      list.filter(function (c) { return c.agentId === "trae"; }).map(function (c) { return c.url; }));
+    ok("容量：被淘汰的是别家平台的旧快照",
+      list.filter(function (c) { return c.url === WB || c.url === LOB; }).length === 58,
+      list.filter(function (c) { return c.url === WB || c.url === LOB; }).length);
+    ok("容量：选样本仍能拿到目标接口", ctx.CreditAdapters.pickCapture(list, "trae").url === TARGET,
+      ctx.CreditAdapters.pickCapture(list, "trae").url);
   });
 }
