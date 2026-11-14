@@ -670,6 +670,89 @@ booted(ui).then(function (ext) {
     });
   });
 }).then(function () {
+  /* ---------- 11. 导入上限要装得下自己的导出（v0.3.32） ----------
+   * expDoc 导出整份 doc，60 条样本 × 单条 200k 字符最坏几十 MB；旧上限 8MB
+   * 会把用户自己刚导出的备份误判成「不像是本扩展导出的数据」。
+   */
+  var ui = createUi(seedDoc());
+  return booted(ui).then(function (ext) {
+    var file = ext.el("#impFile");
+    file.files = [{
+      name: "big-backup.json", size: 9 * 1024 * 1024, type: "application/json",
+      _text: JSON.stringify({ batches: [{
+        agent: "qoder", label: "大备份", granted: 10, remaining: 10, expiresAt: "2026-12-01"
+      }] })
+    }];
+    file.onchange.call(file);
+    return new Promise(function (res) { setTimeout(res, 30); }).then(function () {
+      ok("导入：9MB 的合法备份不会被误判成「不像本扩展导出」",
+        (ext.mem[KEY].batches || []).length === 1, ext.mem[KEY].batches);
+      ok("导入：大备份照常提示加了几笔",
+        ext.el("#toast").textContent.indexOf("批次 +1") >= 0, ext.el("#toast").textContent);
+    });
+  });
+}).then(function () {
+  /* ---------- 12. 看样本：目标接口置顶、via 转义（v0.3.32） ----------
+   * 旧列表按分数排，LobsterAI 的 plans（11 分）永远排在真正被采用的
+   * profile-summary（9 分）前面；文案还写着「最高分那条就是目标」。
+   */
+  var TARGET = "https://api.trae.cn/trae/api/v2/pay/user_current_entitlement_list";
+  var NOISE = "https://api.trae.cn/trae/api/v2/pay/plans";
+  var seed = seedDoc(2);
+  seed.agents.trae = {
+    id: "trae", name: "TRAE", fetchMode: "capture", origin: "https://www.trae.cn",
+    consoleUrl: "https://www.trae.cn/dashboard", endpoint: TARGET, enabled: true
+  };
+  seed.captures = [
+    { agentId: "trae", url: NOISE, method: "GET", status: 200, score: 11,
+      at: "2026-10-22T10:00:00Z", bodyPreview: '{"plans":[]}', bodyLength: 12, via: "<img src=x>" },
+    { agentId: "trae", url: TARGET, method: "GET", status: 200, score: 9,
+      at: "2026-10-21T10:00:00Z", bodyPreview: '{"packs":[]}', bodyLength: 12, via: "fetch" }
+  ];
+  return booted(createUi(seed, "2026-10-23T12:00:00")).then(function (ext) {
+    ext.el("#btnAuth").onclick();
+    clickAct(ext, "#authBody", "caps", "trae");
+    var html = ext.el("#authBody").innerHTML;
+    ok("看样本：目标接口排在高分干扰接口前面",
+      html.indexOf(TARGET) >= 0 && html.indexOf(TARGET) < html.indexOf(NOISE), html.slice(0, 300));
+    ok("看样本：明确标出同步采用的接口", html.includes("目标接口（同步采用这一条）"), html.slice(0, 300));
+    ok("看样本：via 经过 HTML 转义",
+      html.includes("&lt;img src=x&gt;") && html.indexOf("<img src=x>") < 0, html.slice(0, 400));
+  });
+}).then(function () {
+  /* ---------- 13. 平台地址面板内只读（v0.3.33） ----------
+   * 四家后台地址都由 AGENTS/adapter 预置。地址可手改时，填错一行就可能给
+   * qoder.com 装上钩子（会让登录态失效），或让两家共用一个 origin 串账。
+   */
+  return booted(createUi(seedDoc(2), "2026-10-23T12:00:00")).then(function (ext) {
+    var sent = [];
+    ext.ctx.chrome.runtime.sendMessage = function (msg, cb) {
+      sent.push(msg); if (cb) cb({ ok: true, worldAware: true });
+    };
+    ext.ctx.chrome.permissions = {
+      contains: function (_q, cb) { cb(true); },
+      request: function (_q, cb) { cb(true); }
+    };
+    ext.el("#btnAuth").onclick();
+    var html = ext.el("#authBody").innerHTML;
+    ok("授权面板：四个平台地址都只读",
+      (html.match(/data-url=/g) || []).length === 4
+        && (html.match(/readonly/g) || []).length === 4, html.slice(0, 300));
+    ok("授权面板：地址的 change 监听已移除（不再接受手填地址）",
+      ext.el("#authBody").onchange === undefined, typeof ext.el("#authBody").onchange);
+
+    // 即使脚本把 DOM 值改掉，授权也必须用存储里的预置地址。
+    var inp = ext.el('[data-url="trae"]');
+    inp.value = "https://evil.example/x";
+    clickAct(ext, "#authBody", "auth", "trae");
+    return new Promise(function (res) { setTimeout(res, 30); }).then(function () {
+      ok("授权使用预置地址，而不是 DOM 里的值",
+        sent.length === 1 && sent[0].type === "REGISTER_AND_OPEN"
+          && sent[0].origin === "https://www.trae.cn"
+          && sent[0].url === "https://www.trae.cn/dashboard", sent);
+    });
+  });
+}).then(function () {
   console.log("\n" + pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
 }, function (e) {

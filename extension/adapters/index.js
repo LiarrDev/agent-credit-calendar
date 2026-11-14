@@ -57,10 +57,20 @@
    * 会把真正的 profile-summary（分数反而低）挤掉，表现成"adapter 没认出批次"。
    * hint 是接口形状的一部分，必须参与选样本；没有 hint 或圈内为空时才退回总分。
    */
-  function pickCapture(captures, agentId) {
+  function orderedCaptures(captures, agentId) {
     var pool = (captures || []).filter(function (c) {
       return c && c.agentId === agentId && c.bodyPreview;
     });
+    /* 非 2xx 响应先剔掉：它们不可能是额度数据，只适合用来解释失败。
+     * 反例（v0.3.32）：TRAE 接口 URL 自带 entitlement，401 的启发式分数是 2，
+     * 会被正常入库并成为同接口最新的一条；旧逻辑同接口取最新，于是每次同步都
+     * 选中这条 401、报 adapter-threw，把旁边可用的 200 样本完全挡住。
+     * 只有池子里**全是**非 2xx 时才保留，让 adapter 说出「登录态失效」这种
+     * 准确原因，而不是假装没样本。 */
+    var okStatus = pool.filter(function (c) {
+      return !c.status || (c.status >= 200 && c.status < 300);
+    });
+    if (okStatus.length) pool = okStatus;
     // 直读平台优先用本次页面里读到的样本。升级前可能留着旧的粘贴样本，
     // 它的启发式分数有可能更高（比如旧响应里刚好有更多额度字段），
     // 但那份是快照；不优先直读的话，刚读到的数字会被旧样本盖住。
@@ -93,29 +103,24 @@
       var s = (b.score || 0) - (a.score || 0);
       return s !== 0 ? s : byAt;
     });
-    return pool[0] || null;
+    return pool;
   }
 
-  /**
-   * 跑一次映射：capture 样本 -> normalizeBatch -> 批次数组。
-   * 纯函数，不碰 chrome.*，不写存储，所以能在 node 里直接测。
-   * 返回 { ok, batches, capture, reason?, message? }
-   */
-  function runSync(agentId, captures, now) {
-    var N = root.CreditNormalize;
-    if (!N) return { ok: false, reason: "no-normalize", message: "normalize.js 没加载" };
-    if (!has(agentId)) return { ok: false, reason: "no-adapter" };
+  /** 选最可能的那一条（= 有序候选里的第一条）。 */
+  function pickCapture(captures, agentId) {
+    return orderedCaptures(captures, agentId)[0] || null;
+  }
 
-    var capture = pickCapture(captures, agentId);
-    if (!capture) return { ok: false, reason: "no-capture", message: "这个平台还没有捕获样本" };
+  /** 对单条样本跑一次映射。返回 runSync 的同形结果。 */
+  function extractOne(agentId, capture, N, now) {
+    // 截断的样本很可能让 JSON.parse 直接失败，先说清楚，别让人以为平台没数据
     if (capture.truncated) {
-      // 截断的样本很可能让 JSON.parse 直接失败，先说清楚，别让人以为平台没数据
       return { ok: false, reason: "truncated", message: "样本被截断了，去授权面板点「刷新余额」再截一次" };
     }
+    var ad = get(agentId);
     // 有接口提示却选中了别的接口，说明目标接口的样本根本不在库里（多是被样本
     // 上限挤掉的，见 background.js 的 captureRank）。这时再说「没认出批次」会把
     // 人引向接口改版，必须说清手上只有哪个接口。
-    var ad = get(agentId);
     if (ad.endpointHint && !ad.endpointHint.test(String(capture.url || ""))) {
       return {
         ok: false, reason: "no-target",
@@ -126,7 +131,7 @@
 
     var rows;
     try {
-      rows = get(agentId).extract(capture) || [];
+      rows = ad.extract(capture) || [];
     } catch (e) {
       return { ok: false, reason: "adapter-threw", message: String((e && e.message) || e) };
     }
@@ -146,6 +151,31 @@
       // 「没出现 = 这笔没了」去关批次（见 mergeBatches 规则 5）。
       capture: { url: capture.url, score: capture.score || 0, at: capture.at, via: capture.via || null }
     };
+  }
+
+  /**
+   * 跑一次映射：capture 样本 -> normalizeBatch -> 批次数组。
+   * 纯函数，不碰 chrome.*，不写存储，所以能在 node 里直接测。
+   *
+   * 按候选顺序逐条尝试：最新的一条解析失败（被重定向成登录页 HTML、接口临时
+   * 返回坏结构）时，回退到上一条可用样本，而不是让整个平台同步失败。
+   * 池子里通常只有一条（同一接口只保留最新），所以常见路径行为不变。
+   */
+  function runSync(agentId, captures, now) {
+    var N = root.CreditNormalize;
+    if (!N) return { ok: false, reason: "no-normalize", message: "normalize.js 没加载" };
+    if (!has(agentId)) return { ok: false, reason: "no-adapter" };
+
+    var pool = orderedCaptures(captures, agentId);
+    if (!pool.length) return { ok: false, reason: "no-capture", message: "这个平台还没有捕获样本" };
+
+    var primary = null;
+    for (var i = 0; i < pool.length; i++) {
+      var r = extractOne(agentId, pool[i], N, now);
+      if (r.ok) return r;
+      if (!primary) primary = r;
+    }
+    return primary;
   }
 
   var api = {

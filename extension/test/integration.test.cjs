@@ -20,6 +20,16 @@ eq("初始只有 Qoder 直读，其余未授权", [
 ], ["direct", "unauthorized", "unauthorized", "unauthorized"]);
 eq("Qoder 默认 origin 就是取数页面同源", d0.agents.qoder.origin, "https://qoder.com");
 eq("单位统一为 credits", A.AGENTS.every(function (a) { return a.unit === "credits"; }), true);
+
+/* ---------- origin 归属：直读域名不给别家装钩子，一个域名不归两家 ---------- */
+var baseAgents = S.migrate(null).agents;
+eq("平台自己的域名不冲突", A.originConflict("trae", "https://www.trae.cn", baseAgents), null);
+eq("Qoder 的域名不能再给别家装钩子",
+  /属于 Qoder/.test(A.originConflict("trae", "https://qoder.com", baseAgents) || ""), true);
+var claimed = S.migrate({ agents: { workbuddy: { origin: "https://www.trae.cn", fetchMode: "capture" } } });
+eq("同一域名不能归两家",
+  /已经归属/.test(A.originConflict("trae", "https://www.trae.cn", claimed.agents) || ""), true);
+eq("空域名直接拒绝", A.originConflict("trae", "", baseAgents), "地址里没有可用的域名");
 eq("默认地址就是用户给过的四个，一个都不许多", A.AGENTS.map(function (a) { return a.consoleUrl; }),
   ["https://qoder.com/account/usage", "https://www.trae.cn/dashboard",
    "https://www.workbuddy.cn/profile/plans-usage", "https://lobsterai.youdao.com/portal#/profile/detail"]);

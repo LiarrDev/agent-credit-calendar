@@ -702,9 +702,10 @@
           }
           return '<div class="arow" style="--c:' + colorOf(id) + '">'
             + '<div class="an"><i></i>' + esc(a.name) + "</div>"
-            + '<div><input type="url" data-url="' + id + '" placeholder="https://… 积分页面完整地址" value="'
-            + esc(a.consoleUrl || "") + '"' + (direct ? ' readonly title="Qoder 直读页面固定为账户用量页"' : "")
-            + '><div class="hintline">'
+            + '<div><input type="url" data-url="' + id + '" value="'
+            + esc(a.consoleUrl || "") + '" readonly'
+            + ' title="后台地址由扩展预置，面板内不支持修改">'
+            + '<div class="hintline">'
             + '<span class="chip ' + m[1] + '">' + m[0] + "</span> "
             + esc(staticAgent.hint)
             + (caps.length ? " · 已截获 " + caps.length + " 条样本" + (newest ? "（最新 " + hm(newest.at) + "）" : "") : "")
@@ -898,27 +899,35 @@
   function diagnose(p) { return CreditDiagnose.of(p); }
 
   function renderCaptureList(box, agentId) {
+    var a = doc.agents[agentId];
+    // a.endpoint 只会被 adapter 指定的目标接口（或最高分样本）改写，是 UI 侧
+    // 唯一能拿到的「当前同步采用哪一条」的线索（页面里没有 adapter 的 hint）。
+    // 目标接口置顶，其余仍按分数；否则 LobsterAI 的 plans（11 分）会永远排在
+    // 真正被采用的 profile-summary（9 分）前面，排查时被带偏。
+    var chosen = a.endpoint || null;
     var caps = (doc.captures || []).filter(function (c) { return c.agentId === agentId; })
-      // 同分时新的在前：与 pickCapture（adapters/index.js，按 at 降序）同一口径。
-      // 否则"排第一的那条"可能是几分钟前的旧样本，而真正被 adapter 采用的是另一条。
-      .sort(function (a, b) {
-        return (b.score || 0) - (a.score || 0)
-          || (String(b.at || "") < String(a.at || "") ? -1 : 1);
+      .sort(function (x, y) {
+        var xt = chosen && x.url === chosen ? 1 : 0;
+        var yt = chosen && y.url === chosen ? 1 : 0;
+        if (xt !== yt) return yt - xt;
+        return (y.score || 0) - (x.score || 0)
+          || (String(y.at || "") < String(x.at || "") ? -1 : 1);
       });
     capList = caps;   // 导出按钮靠 key 回查，见 capByKey
-    var a = doc.agents[agentId];
     box.innerHTML = '<button class="mini" data-act="backauth">‹ 返回平台列表</button>'
       + renderProbe(a)
       + '<div style="margin:12px 0 8px;font-size:12.5px;color:var(--ink-2)">'
-      + esc(a.name) + " 共 " + caps.length + " 条候选，按「像不像积分接口」打分排序。"
-      + "最高分那条就是我要的字段映射目标。</div>"
+      + esc(a.name) + " 共 " + caps.length + " 条候选。当前同步采用的接口排在最前（同接口取最新），"
+      + "其余按「像不像积分接口」打分排序。</div>"
       + caps.map(function (c, i) {
           var key = capKey(c);
           var open = !!capOpen[key];
+          var isTarget = !!(chosen && c.url === chosen);
           return '<div class="cap' + (i === 0 ? " hi" : "") + '">'
             + '<div class="u">' + esc(c.method) + " " + esc(c.url) + "</div>"
             + '<div class="why">评分 ' + (c.score || 0) + " · " + esc((c.reasons || []).join("；"))
-            + " · " + (c.via || "") + " · " + c.status + " · " + c.bodyLength + " 字节</div>"
+            + (isTarget ? " · <b>目标接口（同步采用这一条）</b>" : "")
+            + " · " + esc(c.via || "") + " · " + c.status + " · " + c.bodyLength + " 字节</div>"
             + (c.requestHeaderNames && c.requestHeaderNames.length
                 ? '<div class="hh">请求头（只有名字，无值）：' + esc(c.requestHeaderNames.join(", ")) + "</div>" : "")
             + (c.truncated
@@ -1057,6 +1066,11 @@
     };
   }
 
+  /* 上限必须装得下自己的导出：60 条样本 × 单条 200,000 字符，UTF-8 与 JSON
+   * 转义之后最坏会到几十 MB。旧上限 8MB 会把用户自己刚导出的备份误判成
+   * 「不像是本扩展导出的数据」——而导入是清空之后唯一的恢复路径。 */
+  var IMPORT_MAX_BYTES = 64 * 1024 * 1024;
+
   /**
    * 导入备份。需求 §3.3 承诺的恢复路径，之前只有导出没有导入 ——
    * 所以「清空本机数据」之后用户其实无路可退，连"把导出的 JSON 贴回来"都做不到。
@@ -1069,7 +1083,11 @@
    * 不是覆盖 —— 现有数据通常更新，而且覆盖等于又造了一条不可恢复的路径）。
    */
   function readImport(file) {
-    if (file.size > 8 * 1024 * 1024) { toast("文件太大（超过 8MB），不像是本扩展导出的数据"); return; }
+    if (file.size > IMPORT_MAX_BYTES) {
+      toast("文件太大（超过 " + Math.round(IMPORT_MAX_BYTES / 1024 / 1024)
+        + "MB）。如果这是本扩展导出的备份，请先精简样本再导入");
+      return;
+    }
     var fr = new FileReader();
     fr.onerror = function () { toast("读文件失败：" + ((fr.error && fr.error.message) || "未知错误")); };
     fr.onload = function () {
@@ -1442,27 +1460,7 @@
       return;
     }
     if (act === "auth") { doAuthorize(id); return; }
-    if (act === "reauth") {
-      var url = $('[data-url="' + id + '"]').value.trim();
-      if (!url) { toast("先填后台地址"); return; }
-      refreshAgent(id);
-      return;
-    }
-  });
-
-  /* 填了地址就记下，不必等点「授权」——否则关掉面板一改回来全没了 */
-  $("#authBody").addEventListener("change", function (e) {
-    var inp = e.target.closest("[data-url]"); if (!inp) return;
-    var id = inp.getAttribute("data-url");
-    var url = (inp.value || "").trim();
-    if (!url) return;
-    try { if (new URL(url).protocol !== "https:") { toast("只支持 https 地址"); return; } }
-    catch (err) { toast("地址格式不对，要贴完整的 https 链接"); return; }
-    var origin = new URL(url).origin;
-    commit(function (f) {
-      if (f.agents[id]) { f.agents[id].consoleUrl = url; f.agents[id].origin = origin; }
-    });
-    renderAuth();   // change 已经在失焦之后触发，重画一次让按钮状态跟上
+    if (act === "reauth") { refreshAgent(id); return; }
   });
 
   /**
@@ -1578,14 +1576,20 @@
   }
 
   function doAuthorize(id) {
-    var inp = $('[data-url="' + id + '"]');
-    var url = (inp.value || "").trim();
+    // 地址由 AGENTS 预置、面板内只读。这里以存储里的配置为准，不再从 DOM 读值，
+    // 免得以后有人把 readonly 去掉，又把任意地址带进权限申请与钩子注册。
+    var url = ((doc.agents[id] || {}).consoleUrl || "").trim();
+    if (!url) { toast("这个平台没有预置后台地址，请更新扩展配置"); return; }
     var origin;
     try {
       var u = new URL(url);
       if (u.protocol !== "https:") { toast("只支持 https 地址"); return; }
       origin = u.origin;
     } catch (e) { toast("地址格式不对，要贴完整的 https 链接"); return; }
+
+    // 直读平台的域名不能被别家借去装钩子；同一域名也不能归两家（会串账）。
+    var bad = AG.originConflict(id, origin, doc.agents);
+    if (bad) { toast(bad); return; }
 
     if (!IS_EXT) { commit(function (f) { if (f.agents[id]) f.agents[id].consoleUrl = url; }); toast("预览模式：地址已记下，授权需装成扩展"); return; }
 

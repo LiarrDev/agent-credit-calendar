@@ -1,9 +1,25 @@
-# Agent 积分过期日历 — 扩展（v0.3.31）
+# Agent 积分过期日历 — 扩展（v0.3.33）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v0.3.31，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v0.3.33，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v0.3.33 「授权与样本」里的平台地址改为只读：四家地址由 `AGENTS` / adapter 预置，
+授权、刷新都从存储里的配置取地址，不再读输入框。地址可手改时，填错一行就可能给
+qoder.com 装上钩子（会让登录态失效），或让两家共用一个 origin 串账。
+
+v0.3.32 修 review 里两条 P1 与四条 P2：
+- **未授权平台的卡片「↻」不再崩**：`doRefresh` 现在校验 `origin`（新装时非直读平台还是 null），
+  返回人话提示；`register` 的同步抛错也纳入 `endProbe` 收尾，探针不再泄漏。
+- **非 2xx 不再污染样本库**：4xx/5xx 不入库（TRAE 的 401 曾因 URL 含 entitlement 拿到 2 分，
+  成为同接口最新样本后把可用的 200 样本挡住）；`pickCapture` 排除非 2xx，`runSync` 最新一条
+  解析失败时回退到上一条；授权等待里页面自己返回 401 也会写「页面还没登录」（LobsterAI 之前永远等不到）。
+- **无法再把别家地址授权成 Qoder 的域名**：`originConflict` 禁止给直读域名装钩子、禁止一域名归两家。
+- **相对 URL 的响应不再被静默丢弃**：`capture-main` 上报前用 `location.href` 补全成绝对地址。
+- **导入上限与自身导出对齐**：8MB → 64MB，大备份不会被误判成「不像本扩展导出」。
+- **「看样本」按实际选样口径排序**：当前同步采用的接口置顶并标注，`via` 一律转义；导入/页面传来的
+  `via` 只接受白名单值。
 
 v0.3.31 修 WorkBuddy「授权」后一直停在「等待授权中」：授权页加载完，扩展会主动在页面里代发一次额度请求，已登录就直接写入日历，不再只等 SPA 自己发（REQUIREMENTS 决策 31）。
 
@@ -168,10 +184,10 @@ adapters/lobsterai.js  LobsterAI 的 creditItems 映射（照 2026-10-22 真实�
 adapters/trae.js       TRAE 的额度包映射（照 2026-10-22 真实响应写的，有单测）
 adapters/workbuddy.js  WorkBuddy 的免费/赠送包映射 + 代发兜底配方（照真实响应与站点 bundle 写的，有单测）
 ui/calendar.html|css|js  日历界面
-test/*.test.cjs        node 单测，共 505 条断言（含 capture-main 的 XHR 回归、中继的
-                       信任边界回归、探针诊断回归、130KB 截断样本升级回归、导入清洗回归，
-                       以及 e2e-refresh 在 mock chrome 里跑通的整条刷新链路、
-                       ui.test 用 DOM 桩钉住的页脚/清空确认/导入接线）
+test/*.test.cjs        node 单测，共 862 条断言（含 capture-main 的 XHR/相对 URL 回归、中继的
+                       信任边界回归、探针诊断回归、130KB 截断样本升级回归、导入清洗回归、
+                       非 2xx 样本与 origin 归属回归，以及 e2e-refresh 在 mock chrome 里跑通的
+                       整条刷新链路、ui.test 用 DOM 桩钉住的页脚/清空确认/导入/看样本接线）
 test/run-all.cjs       串起全部单测并汇总（npm test 用的就是它）
 ```
 
@@ -199,7 +215,7 @@ node test/normalize.test.cjs # 也可以只跑某一个文件
 
 1. 地址栏打开 `opera://extensions`
 2. 打开右上角的 **Developer mode**
-3. 点 **Load unpacked extension**，选中 `agent-balance/extension` 这个目录
+3. 点 **Load unpacked extension**，选中 `agent-credit-calendar/extension` 这个目录
 4. 点工具栏图标即打开日历（数据存在本机 `chrome.storage.local`，不上传任何地方）
 
 Chrome 同理，入口是 `chrome://extensions`。Edge 是 `edge://extensions`。
@@ -222,7 +238,7 @@ Qoder 不需要「授权」，也不会再装钩子。原因已经确认：钩�
    **不经过扩展、不写进存储**。扩展没有拿你的 cookie 或 token 去做别的事，也不会在后台裸调接口。
 3. 如果没登录，接口回 401：这个页面会**留在前台**，你登录完再点一次「刷新余额」即可；
    其他失败会关页、在行内显示原因，并保留旧批次。
-4. 地址框对 Qoder 是只读的——接口和取数页面由 adapter 固定，避免误改成任意地址。
+4. 四家的地址框都是只读的（v0.3.33 起）——接口和取数页面由 adapter / `AGENTS` 固定，面板内不支持改成任意地址。
 5. 失败时点「读取诊断」：探针会列出接口、HTTP 状态、响应字节数、开页尝试和最终结论
    （未登录 / 页面内请求没发出去 / HTTP 错误 / 200 但没有额度字段），比一句"读取失败"更能定位。
 
@@ -243,7 +259,7 @@ Copy response，只把响应体贴进去。入库走同一套打分与脱敏。
 所以仍然走「授权 → 打开 portal → 钩子旁路截获」：钩子只挂在 portal 域名上，
 `host_permissions` 里也不需要接口域名，截到的样本 URL 仍记录完整的 API 地址。
 
-1. 「授权与样本」里确认 LobsterAI 地址，点「授权」→ 打开 portal 页；在里面登录后，
+1. 「授权与样本」里核对 LobsterAI 的固定地址，点「授权」→ 打开 portal 页；在里面登录后，
    截到 `profile-summary` 且接口 2xx，扩展会自动同步并写入日历（v0.3.7），面板从
    「等待授权中」变成「最近一次授权完成」
 2. 点「刷新余额」→ 扩展开一个 portal 页，让页面自己重发请求，读到当下的数字；
@@ -287,7 +303,7 @@ v0.3.17 起圈内改成**按时间取最新**（分数只在跨接口时用）�
 所以和 LobsterAI 一样走「授权 → 打开 dashboard → 钩子旁路截获」：钩子只挂在 `www.trae.cn` 上，
 `host_permissions` 里也没有 `api.trae.cn`，截到的样本 URL 仍记录完整的 API 地址。
 
-1. 「授权与样本」里确认 TRAE 地址，点「授权」→ 打开 dashboard；在里面登录后，
+1. 「授权与样本」里核对 TRAE 的固定地址，点「授权」→ 打开 dashboard；在里面登录后，
    截到 `user_current_entitlement_list` 且接口 2xx，扩展会自动同步并写入日历（v0.3.7），
    面板从「等待授权中」变成「最近一次授权完成」，不用再点「刷新余额」
 2. 点「刷新余额」→ 页面重新请求，数字更新；钩子已解除时只临时装一次，读完立刻注销
@@ -319,7 +335,7 @@ v0.3.17 起圈内改成**按时间取最新**（分数只在跨接口时用）�
 `https://www.workbuddy.cn/billing/meter/get-user-resource-free-packages`（同源）。
 所以仍走「授权 → 打开页面 → 钩子旁路截获」，不会在 service worker 里拿你的 cookie 裸调接口。
 
-1. 「授权与样本」里确认 WorkBuddy 地址，点「授权」→ 打开页面；登录后截到
+1. 「授权与样本」里核对 WorkBuddy 的固定地址，点「授权」→ 打开页面；登录后截到
    `get-user-resource-free-packages` 且接口 2xx，扩展会自动同步并写入日历（v0.3.7 起的授权会话），
    面板从「等待授权中」变成「最近一次授权完成」
 2. 点「刷新余额」→ 页面重新请求，数字更新；钩子已解除时只临时装一次，读完立刻注销
@@ -436,21 +452,21 @@ fetch 当异常，点该平台的「粘贴样本」：F12 → Network → 找到
 
 | 项目 | 状态 |
 | --- | --- |
-| `adapters/qoder.js` + 页面内直读 | **已完成**（照真实响应写映射；22 条单测 + 41 条浏览器端到端） |
-| `adapters/lobsterai.js` + 跨域截获 | **已完成**（照真实响应写映射；26 条单测 + 67 条浏览器端到端，真实账号待你点一次授权） |
-| `adapters/trae.js` + 跨域截获 | **已完成**（照真实响应写映射；28 条单测 + 62 条浏览器端到端，真实账号待你点一次授权） |
-| `adapters/workbuddy.js` + 同源截获 | **已完成**（免费/赠送包；44 条单测 + 77 条浏览器端到端，真实账号待你点一次授权） |
+| `adapters/qoder.js` + 页面内直读 | **已完成**（照真实响应写映射；25 条单测 + 41 条浏览器端到端） |
+| `adapters/lobsterai.js` + 跨域截获 | **已完成**（照真实响应写映射；33 条单测 + 67 条浏览器端到端，真实账号待你点一次授权） |
+| `adapters/trae.js` + 跨域截获 | **已完成**（照真实响应写映射；34 条单测 + 62 条浏览器端到端，真实账号待你点一次授权） |
+| `adapters/workbuddy.js` + 同源截获 | **已完成**（免费/赠送包；69 条单测 + 77 条浏览器端到端，真实账号待你点一次授权） |
 | WorkBuddy 付费/订阅包接口（如果控制台总余额高于免费包合计） | 待样本，有的话再补一个 adapter 分支 |
 | `.ics` 导出（导进系统日历白拿提醒） | 计划 M3，还没动 |
 | 图标、名称微调 | 还没做 |
 
 ## 我这边验过什么、没验什么
 
-跑过：`node test/normalize.test.cjs`（56）、`node test/integration.test.cjs`（61）、
-`node test/adapters.test.cjs`（27）、`node test/qoder.test.cjs`（22）、
-`node test/lobsterai.test.cjs`（26）、`node test/trae.test.cjs`（28）、
-`node test/capture-main.test.cjs`（7）、`node test/workbuddy.test.cjs`（44），
-共 **271 条断言**全部 0 失败；
+跑过：`cd extension && npm test`（等价 `node test/run-all.cjs`），
+14 个文件共 **862 条断言**全部 0 失败：
+normalize 132、integration 112、adapters 102、workbuddy 69、diagnose 68、
+e2e-refresh 88、ui 137、trae 34、lobsterai 33、qoder 25、sync-all 22、
+capture-main 18、capture-relay 12、ownership 10；
 所有 JS 过 `node --check`；
 浏览器端到端共 **247 条**（Qoder 41 / LobsterAI 67 / TRAE 62 / WorkBuddy 77），全部 0 失败；
 `ui/calendar.html` 在 file:// 下逐条断言过渲染、补录、修正、行内二次确认删除、
@@ -519,7 +535,7 @@ v0.3.2 另外用真机上已经存下的 17 条捕获复现了本次故障：旧
 只能在你的 Opera 里验证。本地替身是 `http://127.0.0.1`，而面板的授权只接受 https 地址，
 所以 E2E 直接向后台发 `REGISTER_AND_OPEN`（真实站点只多这一层 https 校验，
 注册、注入、开页、收尾走同一条代码路径）。
-请在升级到 **0.3.9** 后对 Qoder / WorkBuddy 各点一次「刷新余额」——WorkBuddy 已授权过，
+请在升级到 **0.3.32** 后对 Qoder / WorkBuddy 各点一次「刷新余额」——WorkBuddy 已授权过，
 这次刷新会把旧的 60KB 截断样本原位换成完整响应；LobsterAI / TRAE 若还没授权，各点一次「授权」，
 在打开的页面里登录并等面板显示「最近一次授权完成」。如果 WorkBuddy 控制台总余额明显高于
 免费包合计（约 5.8k），把付费/订阅接口的响应另存一份给我。

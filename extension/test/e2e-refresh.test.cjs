@@ -314,6 +314,18 @@ function runRefresh(dropOnChanged, fastWait, scriptResults) {
     console.log("--- 场景 10：授权页打开后主动代发（v0.3.31）");
     return authSendChecks();
   }).then(function () {
+    console.log("--- 场景 11：未授权平台刷新要说人话、不泄漏探针（v0.3.32）");
+    return unauthorizedRefreshChecks();
+  }).then(function () {
+    console.log("--- 场景 12：非 2xx 不入库，401 写进授权等待（v0.3.32）");
+    return non2xxChecks();
+  }).then(function () {
+    console.log("--- 场景 13：样本 via 白名单（v0.3.32）");
+    return viaWhitelistChecks();
+  }).then(function () {
+    console.log("--- 场景 14：跨平台 origin 授权被拒（v0.3.32）");
+    return originConflictChecks();
+  }).then(function () {
     console.log("\n" + pass + " passed, " + fail + " failed");
     process.exit(fail ? 1 : 0);
   }, function (e) {
@@ -778,5 +790,136 @@ function needLoginOnAuthChecks() {
       !!(a.authResult && a.authResult.reason === "auth"), a.authResult);
     ok("授权未登录：绝不写空批次", (o.mem[KEY].batches || []).length === 0,
       o.mem[KEY].batches);
+  });
+}
+
+/**
+ * 场景 11：全新安装时，卡片上的「↻」对所有平台都渲染，但 TRAE / WorkBuddy /
+ * LobsterAI 的 origin 还是 null。旧 doRefresh 只挡 consoleUrl（有代码默认值，
+ * 永远不命中），register(null) 在 idsFor 里同步抛 TypeError，而且抛在 .catch
+ * 挂上之前，beginProbe 的探针会永久留在 probeMem 里。
+ */
+function unauthorizedRefreshChecks() {
+  var ext = createExt(false, true);
+  return new Promise(function (resolve) {
+    ext.send({ type: "REFRESH_CAPTURES", agentId: "trae", ephemeral: true }, resolve);
+  }).then(function (r) {
+    ok("未授权刷新：被拒绝而不是崩", !!(r && r.ok === false), r);
+    ok("未授权刷新：错误是人话，不是 TypeError",
+      /还没授权/.test(String(r && r.error)) && !/TypeError|reading 'replace'/.test(String(r && r.error)),
+      r && r.error);
+    ok("未授权刷新：探针没有残留", ext.ctx.probeMem.trae === undefined,
+      Object.keys(ext.ctx.probeMem || {}));
+    ok("未授权刷新：没有开标签页", ext.tabs.created.length === 0, ext.tabs.created);
+  });
+}
+
+/**
+ * 场景 12：TRAE 的目标接口 URL 自带 entitlement，401 JSON 的启发式分数是 2。
+ * 旧逻辑会把它入库并成为同接口最新的一条，之后每次同步都选中它、报
+ * adapter-threw；同时 settleAuthCapture 被 `score > 0` 挡住，LobsterAI 这类
+ * 分数 0 的平台永远等不到「页面还没登录」的提示。两件事一起钉住。
+ */
+function non2xxChecks() {
+  var TRAE_API = "https://api.trae.cn/trae/api/v2/pay/user_current_entitlement_list";
+  var TRAE_PAGE = "https://www.trae.cn/dashboard";
+  var ext = createExt(false, true);
+  var ctx = ext.ctx;
+  return ctx.CreditStore.update(function (d) {
+    d.agents.trae = Object.assign({}, d.agents.trae, {
+      origin: "https://www.trae.cn", consoleUrl: TRAE_PAGE, fetchMode: "capture",
+      hookActive: true, authPending: { startedAt: new Date().toISOString() }
+    });
+  }).then(function () {
+    var p = ctx.beginProbe("trae", "hook");
+    return ctx.onCaptured({
+      url: TRAE_API, method: "GET", status: 401,
+      body: JSON.stringify({ code: 401, message: "unauthorized" }),
+      requestHeaderNames: [], via: "fetch", pageUrl: TRAE_PAGE
+    }, { tab: { id: 9, url: TRAE_PAGE } }).then(function (r) {
+      return ctx.CreditStore.load().then(function (d) { return { r: r, d: d, p: p }; });
+    });
+  }).then(function (o) {
+    ok("非 2xx：401 不入库", (o.d.captures || []).length === 0, o.d.captures);
+    ok("非 2xx：探针记下目标接口状态", o.p.endpointStatus === 401, o.p.endpointStatus);
+    ok("非 2xx：不算候选，只算被刷掉",
+      o.p.candidates === 0 && o.p.rejected === 1, { candidates: o.p.candidates, rejected: o.p.rejected });
+    ok("授权等待：页面自己返回 401 时写「还没登录」",
+      !!(o.d.agents.trae.authResult && o.d.agents.trae.authResult.reason === "auth"),
+      o.d.agents.trae.authResult);
+    ok("授权等待：401 不结束等待（登录后可继续）", !!o.d.agents.trae.authPending,
+      o.d.agents.trae.authPending);
+
+    /* LobsterAI 的目标接口 URL 不含积分类关键词，401 响应打分 0、根本不会入库。
+     * 旧守卫 `!stored.score` 会在这里直接 return，401 分支永远走不到——这正是
+     * 面板一直停在「等待授权中」、用户不知道是没登录的那条路径。 */
+    return ctx.CreditStore.update(function (d) {
+      d.agents.lobsterai = Object.assign({}, d.agents.lobsterai, {
+        origin: "https://lobsterai.youdao.com",
+        consoleUrl: "https://lobsterai.youdao.com/portal#/profile/detail",
+        fetchMode: "capture", hookActive: true,
+        authPending: { startedAt: new Date().toISOString() }
+      });
+    });
+  }).then(function () {
+    return ctx.onCaptured({
+      url: "https://lobsterai-server.youdao.com/api/user/profile-summary",
+      method: "GET", status: 401,
+      body: JSON.stringify({ code: 401, message: "unauthorized" }),
+      requestHeaderNames: [], via: "fetch",
+      pageUrl: "https://lobsterai.youdao.com/portal#/profile/detail"
+    }, { tab: { id: 10, url: "https://lobsterai.youdao.com/portal#/profile/detail" } });
+  }).then(function () {
+    return ctx.CreditStore.load();
+  }).then(function (d) {
+    ok("授权等待：打分 0 的 401（LobsterAI）也能提示未登录",
+      !!(d.agents.lobsterai.authResult && d.agents.lobsterai.authResult.reason === "auth"),
+      d.agents.lobsterai.authResult);
+    ok("授权等待：LobsterAI 的 401 也不结束等待", !!d.agents.lobsterai.authPending,
+      d.agents.lobsterai.authPending);
+    ok("非 2xx：LobsterAI 的 401 同样不入库", (d.captures || []).length === 0, d.captures);
+  });
+}
+
+/** 场景 13：entry.via 来自页面，导入文件也能手改；落盘的必须是白名单值。 */
+function viaWhitelistChecks() {
+  var ext = createExt(false, true);
+  return ext.ctx.storeCapture("workbuddy", {
+    url: API, method: "POST", status: 200, body: BODY,
+    via: '<img src=x onerror=alert(1)>', pageUrl: PAGE, requestHeaderNames: []
+  }, null).then(function (r) {
+    ok("via 白名单：样本仍能正常入库", !!(r && r.stored), r);
+    var caps = ext.mem[KEY].captures || [];
+    ok("via 白名单：伪造值落库为 unknown",
+      caps.length === 1 && caps[0].via === "unknown", caps.map(function (c) { return c.via; }));
+    ok("via 白名单：页面字符串没有被原样保存",
+      JSON.stringify(caps).indexOf("onerror") < 0, caps);
+  });
+}
+
+/**
+ * 场景 14：地址框可编辑，把 qoder.com 填进 TRAE 那一行就会在 Qoder 上装钩子
+ * （已确认钩子在场会让 qoder.com 作废登录态）；一个域名也不能同属两家，
+ * 否则 attributeAgent 会把样本记到排在前面的那家账上。
+ */
+function originConflictChecks() {
+  var ext = createExt(false, true);
+  return new Promise(function (resolve) {
+    ext.send({ type: "REGISTER_AND_OPEN", agentId: "trae",
+      origin: "https://qoder.com", url: "https://qoder.com/account/usage" }, resolve);
+  }).then(function (r) {
+    ok("origin 归属：拒绝给 Qoder 的域名装钩子",
+      !!(r && r.ok === false) && /属于 Qoder/.test(String(r.error)), r);
+    ok("origin 归属：拒绝后没有打开页面", ext.tabs.created.length === 0, ext.tabs.created);
+    return new Promise(function (resolve) {
+      ext.send({ type: "REGISTER_AND_OPEN", agentId: "trae",
+        origin: "https://www.workbuddy.cn", url: PAGE }, resolve);
+    });
+  }).then(function (r) {
+    ok("origin 归属：拒绝一个域名归两家",
+      !!(r && r.ok === false) && /已经归属/.test(String(r.error)), r);
+    ok("origin 归属：TRAE 的 origin 没有被写坏",
+      !ext.mem[KEY].agents.trae || ext.mem[KEY].agents.trae.origin !== "https://www.workbuddy.cn",
+      ext.mem[KEY].agents.trae);
   });
 }

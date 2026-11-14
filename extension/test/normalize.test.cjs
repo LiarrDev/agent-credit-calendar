@@ -302,6 +302,17 @@ eq("导入：只留下 1 条合法样本", imported.captures.length, 1);
 eq("导入：非 http(s) 的接口地址被丢掉", imported.droppedCaptures, 2);
 eq("导入：样本补上 agentId/score", [imported.captures[0].agentId, imported.captures[0].score], ["qoder", 5]);
 
+/* via 会落盘、导出、渲染，还会被 syncOne 用来判断「是不是活读」；
+ * 导入文件可手改，所以只认白名单，别把任意字符串透传进 UI。 */
+var viaImport = N.importSnapshot({
+  captures: [
+    { agentId: "qoder", url: "https://qoder.com/a", bodyPreview: "{}", score: 3, via: "direct" },
+    { agentId: "qoder", url: "https://qoder.com/b", bodyPreview: "{}", score: 2, via: "<img src=x onerror=1>" },
+    { agentId: "qoder", url: "https://qoder.com/c", bodyPreview: "{}", score: 1 }
+  ]
+}, { agents: ["qoder"] });
+eq("导入：via 只接受白名单", viaImport.captures.map(function (c) { return c.via; }), ["direct", "import", "import"]);
+
 // 「后台已不再返回」也得能原样导回来：丢了它，那笔钱在新机器上又会变成可用余额
 var goneImport = N.importSnapshot({
   batches: [{ agent: "lobsterai", label: "每日登录奖励 11-07", granted: 100, remaining: 100,

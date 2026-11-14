@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v0.3.30**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
+> 状态：`extension/` **v0.3.33**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -21,6 +21,9 @@
 > v0.3.28 标题下模式说明显示当前扩展版本号，版本直接读 manifest.json，不再需要单独维护界面常量。
 > v0.3.29 每次打开默认选中今天，不再恢复上次选中的日期与月份；编辑中的批次和已用尽标记仍按存储恢复。
 > v0.3.30 平台卡片右上角加刷新按钮，与授权面板的「刷新余额」共用 refreshAgent()；忙碌时按钮变「…」并禁用，防连点。
+> v0.3.31 修 WorkBuddy 授权后停在「等待授权中」：授权页加载完主动在页面上下文里代发一次额度请求，成功直接写日历（决策 31）。
+> v0.3.33 「授权与样本」里的平台地址改为只读，授权/刷新只从存储配置取地址（决策 33）。
+> v0.3.32 修 review 的两条 P1 与四条 P2：未授权平台刷新抛 TypeError、非 2xx 样本顶掉可用样本/401 授权提示不可达、origin 归属校验、相对 URL 被中继丢弃、导入上限小于自身导出、看样本排序与选样口径不一致（决策 32）。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
@@ -656,6 +659,44 @@ free-packages 响应有 **约 130KB**，而 `sanitizeCapture` 的默认上限仍
     回归：`e2e-refresh` +9（场景 10：已登录代发成功并写 3 笔、清等待、标 `via:"direct"`；
     401 保持等待、写 `authResult.reason="auth"`、不写空批次），共 **824 条**全绿。
 
+32. **（v0.3.32）按第二轮 review 修 P1×2 + P2×4：未授权刷新、非 2xx、origin 归属、相对 URL、导入上限、看样本排序。**
+    - **未授权刷新不崩**：卡片按钮对所有平台渲染，但新装时非直读平台的 `origin` 还是 null，
+      `register(null)` 在 `idsFor` 里同步抛 TypeError，且绕过 `.catch` 把探针留在 `probeMem`。
+      `doRefresh` 先校验 `origin` 并返回人话提示；`register` 也包进 `Promise.resolve().then`
+      确保同步抛错能走到 `endProbe`。
+    - **非 2xx 不入库**：TRAE 的接口 URL 自带 entitlement，401 的启发式分数是 2，旧逻辑会把它
+      当候选存下并成为同接口最新样本，之后每次同步都选中 401、报 adapter-threw，把可用的 200
+      样本挡住。现在 4xx/5xx 只记探针不入库；`pickCapture` 排除非 2xx；`runSync` 按候选顺序
+      逐条尝试（最新一条是不可解析的登录页 HTML 时回退到上一条）。
+    - **401 写进授权等待**：`settleAuthCapture` 不再要求 `score > 0` 才处理 401/403——LobsterAI
+      的接口 URL 不含积分关键词、401 响应打分 0，旧守卫让它永远等不到「页面还没登录」。
+    - **origin 归属**：`CreditAgents.originConflict` 禁止给直读平台（Qoder）的域名装钩子、
+      禁止一个域名归两家；UI 保存地址与后台 `doRefresh` / `registerAndOpen` 三处都校验。
+    - **相对 URL**：`capture-main.post` 用 `location.href` 把 `/api/x` 补成绝对地址（中继只收
+      http(s)，旧逻辑会在页面用相对地址时静默丢弃全部捕获）。
+    - **导入上限**：8MB → 64MB，且文案不再说「不像本扩展导出」——`expDoc` 的整份 doc
+      最坏可达几十 MB，旧上限会拒绝用户自己的备份（导入是清空后唯一的恢复路径）。
+    - **看样本**：当前同步采用的接口（`agent.endpoint`）置顶并标注，其余才按分数；`via` 渲染
+      一律转义，入库/导入只接受白名单值。
+    回归：`e2e-refresh` +19（未授权刷新、401 不入库与授权提示、LobsterAI 打分 0 的 401、via 白名单、跨平台 origin），
+    `trae` +5（401 不顶掉 200、不可解析样本回退）、`integration` +4（origin 归属）、
+    `normalize` +1（导入 via 白名单）、`capture-main` +1（相对 URL 补全）、
+    `ui` +5（9MB 导入、看样本置顶与转义），共 **859 条**全绿。
+
+33. **（v0.3.33）「授权与样本」里的平台地址改为只读，不再允许手填。**
+    地址框原先四家里只有 Qoder 只读，其余三家可编辑，失焦即写进 `consoleUrl/origin`。
+    填错一行就能把 qoder.com 写进别家平台，随后装钩子（会让登录态失效），或让两家
+    共用一个 origin（`attributeAgent` 按 origin 匹配，样本会记到排在前面的那家账上）。
+    v0.3.32 的 `originConflict` 只挡住了错误组合，没挡住"用户本就不该改"这个入口。
+    - **改法**：`renderAuth` 对四个平台输入框一律 `readonly`；删除 `#authBody` 的
+      change 保存逻辑；`doAuthorize` 与 `reauth` 改为从 `doc.agents[id].consoleUrl`
+      取地址，不再读 DOM。只读样式与可编辑输入区分开。
+    - **边界**：粘贴样本的「接口地址」仍可编辑——那是样本自身的 endpoint，不是平台配置；
+      「看样本」「刷新余额」等行为不变。旧文档里已保存的自定义地址仍以存储为准，
+      升级时不静默覆盖（要变更请改 `AGENTS`/`migrate` 配置）。
+    回归：`ui` +3（四个地址只读、change 监听已移除、DOM 值被改后授权仍用预置地址），
+    共 **862 条**全绿。
+
 ## 8. 需要你提供 / 待确认
 
 **已确认（v3 落实进代码）**：四个平台的单位都是 credits（但依然不跨 agent 合并，见 §2）；日常浏览器是 Opera，按 Chrome MV3 扩展装载（`opera://extensions` → 开发者模式 → 载入已解包的扩展）。
@@ -672,7 +713,7 @@ TRAE（v0.3.5）、WorkBuddy 免费/赠送包（v0.3.8）都照真实响应写�
    我再补映射。截不到就点「粘贴样本」把响应体贴进来（或发 cURL，cookie/token 替换成 `REDACTED`）。
 若某平台截不到任何候选（数据直接写在 HTML 里、或你更愿意走 cURL），**发 cURL 也行，但请把 cookie/token 的值替换成 `REDACTED`**——我需要的只是 URL、请求头名字和响应结构，不是你的凭据。cURL 只有请求头没有响应体，所以它是"截获失败时补充结构信息"的退路，不能替代响应体本身。
 
-~~四个积分后台的 URL~~ 已收到（2026-10-21），并预置为 `consoleUrl` 默认值（决策 16）。面板里仍可改。
+~~四个积分后台的 URL~~ 已收到（2026-10-21），并预置为 `consoleUrl` 默认值（决策 16）。v0.3.33 起面板内只读（决策 33），地址以代码预置值为准；旧文档里已保存的自定义地址仍被保留，不静默覆盖。
 
 `.ics` 导出建议做进 M3（解释见 §3.3），不挡主线；MVP 里先不做也可，因为扩展页面本身就会显示倒计时。
 

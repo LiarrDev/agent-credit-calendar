@@ -630,7 +630,9 @@
       score: Math.max(0, importNum(raw.score) || 0),
       reasons: Array.isArray(raw.reasons)
         ? raw.reasons.filter(function (s) { return typeof s === "string"; }).slice(0, 8) : [],
-      via: typeof raw.via === "string" ? raw.via : "import"
+      // via 是页面可伪造、导入文件可手改的字符串，它还会被渲染和用于「活读」判断，
+      // 所以只认代码认识的来源，别原样透传。
+      via: ["fetch", "xhr", "direct", "paste", "import"].indexOf(raw.via) >= 0 ? raw.via : "import"
     };
   }
 

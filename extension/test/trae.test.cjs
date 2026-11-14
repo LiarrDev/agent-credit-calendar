@@ -156,5 +156,27 @@ eq("高分干扰接口不挤掉 entitlement_list", D.pickCapture(noisy, "trae").
 eq("混合样本里仍能认出 5 个批次", D.runSync("trae", noisy, now).batches.length, 5);
 eq("query 参数不影响提示匹配", D.get("trae").endpointHint.test(capture.url + "?t=1"), true);
 
+/* 非 2xx 不能成为候选顶掉可用样本（v0.3.32）。
+ * 真机路径：TRAE 的接口 URL 自带 entitlement，401 的启发式分数是 2；旧逻辑会把
+ * 它当候选入库，pickCapture 同接口取最新，于是之后每次同步都选中 401、报
+ * adapter-threw，把旁边可用的 200 样本完全挡住。 */
+var bad401 = Object.assign({}, capture, {
+  status: 401, at: "2026-10-22T04:00:00Z",
+  bodyPreview: JSON.stringify({ code: 401, message: "unauthorized" })
+});
+eq("同接口有 200 样本时不选 401", D.pickCapture([capture, bad401], "trae").status, 200);
+eq("只有 401 时仍明确报登录失效", /登录态失效/.test(
+  D.runSync("trae", [bad401], now).message), true);
+
+/* 最新一条是 200 但不可解析（被重定向成登录页 HTML）时，回退到上一条可用样本，
+ * 而不是让整个平台的同步失败。 */
+var loginHtml = Object.assign({}, capture, {
+  at: "2026-10-22T06:00:00Z", score: 2, bodyPreview: "<html>login</html>"
+});
+var fallback = D.runSync("trae", [capture, loginHtml], now);
+eq("最新样本不可解析时回退到上一条", fallback.ok, true);
+eq("回退后仍认出 5 个批次", fallback.batches.length, 5);
+eq("回退时采用可用的那条样本", fallback.capture.at, capture.at);
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

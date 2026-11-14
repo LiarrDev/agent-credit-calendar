@@ -47,6 +47,10 @@
     try {
       entry.origin = location.origin;
       entry.pageUrl = location.href;
+      // 页面的 fetch/XHR 常用相对地址（"/api/x"）。中继只接受 http(s)，
+      // 不在这里补全就会被静默丢弃，表现成「钩子在、页面一个响应都没发」。
+      // 解析失败就保留原值，交给中继按形状挡掉。
+      try { entry.url = new URL(entry.url, location.href).href; } catch (e2) {}
       entry.at = Date.now();
       window.postMessage({ __creditCapture: true, entry: entry }, "*");
     } catch (e) { /* 中继没注入进来，静默丢掉即可 */ }

@@ -2,7 +2,9 @@
  * agents.js — 四个平台的静态配置。
  *
  * consoleUrl 的默认值来自用户本人提供的后台地址（2026-10-21 那一轮），不是猜的。
- * 用户仍可在「授权与样本」里改掉；清空后 migrate 会把默认值填回来。
+ * v0.3.33 起面板里只读：地址参与权限申请与钩子注册，手改一个错域名就可能给
+ * qoder.com 装上钩子、或让两家共用一个 origin 串账。老文档里已经存下的自定义
+ * 地址仍以存储为准，升级时不静默覆盖。
  *
  * fetchMode 的含义：
  *   unauthorized   还没授权，不知道能不能抓（其余三家的初始态）
@@ -121,9 +123,38 @@
     return { score: score, reasons: reasons };
   }
 
+  /**
+   * 授权 / 刷新前的 origin 归属校验：返回错误文案，null 表示可用。
+   *
+   * 守两条底线：
+   *   1. 直读平台（Qoder）不注册任何钩子——钩子在场会作废它的登录态（决策 17/18）。
+   *      地址框对用户可编辑，把 qoder.com 填进别家平台那一行时必须在这里挡住，
+   *      而不是指望用户记得。
+   *   2. 一个 origin 只归属一个平台：attributeAgent 按 origin 线性匹配，两个平台
+   *      共用一个域名时，样本会被记到排在前面的那家账上。
+   */
+  function originConflict(agentId, origin, agents) {
+    if (!origin) return "地址里没有可用的域名";
+    var i;
+    for (i = 0; i < AGENTS.length; i++) {
+      var a = AGENTS[i];
+      if (a.direct && a.origin === origin) {
+        return "这个域名属于 " + a.name + "（接口直读，不装钩子）：" + origin;
+      }
+    }
+    var ids = Object.keys(agents || {});
+    for (i = 0; i < ids.length; i++) {
+      if (ids[i] === agentId) continue;
+      if (agents[ids[i]] && agents[ids[i]].origin === origin) {
+        return "这个域名已经归属 " + (agents[ids[i]].name || ids[i]) + "：" + origin;
+      }
+    }
+    return null;
+  }
+
   var api = {
     AGENTS: AGENTS, MODE_LABEL: MODE_LABEL, byId: byId,
-    originOf: originOf, attributeAgent: attributeAgent,
+    originOf: originOf, attributeAgent: attributeAgent, originConflict: originConflict,
     scoreCapture: scoreCapture, isStaticUrl: isStaticUrl
   };
   root.CreditAgents = api;

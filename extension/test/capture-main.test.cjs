@@ -71,6 +71,7 @@ var sandbox = {
   setTimeout: setTimeout,
   clearTimeout: clearTimeout,
   Headers: function () {},
+  URL: URL,
   location: { origin: "https://example.test", href: "https://example.test/dashboard" },
   XMLHttpRequest: OrigXHR,
   fetch: function () { return Promise.resolve({}); },
@@ -125,7 +126,10 @@ ok("原型方法仍然看起来像原生函数",
 xhr.fire("loadend");
 var entry = posted.length ? posted[posted.length - 1].entry : null;
 ok("响应结束后上报一次", !!entry, posted);
-ok("上报的 URL 与方法正确", entry && entry.url === "/api/x" && entry.method === "GET", entry);
+// 页面里的 fetch/XHR 常用相对地址；中继只收 http(s)，必须在 MAIN world 补全，
+// 否则这类响应会被静默丢弃，表现成「钩子在、页面一个响应都没发」。
+ok("相对 URL 被补全成绝对地址", entry && entry.url === "https://example.test/api/x", entry);
+ok("上报的 URL 与方法正确", entry && entry.method === "GET", entry);
 ok("捕获到请求头，但只有名字没有值",
   entry && JSON.stringify(entry.requestHeaderNames) === JSON.stringify(["X-Test"]),
   entry && entry.requestHeaderNames);
@@ -156,7 +160,7 @@ ok("responseType=json 时从 response 序列化出响应体",
   jentry && jentry.body === JSON.stringify({ code: 0, data: { Accounts: [1, 2, 3] } }),
   jentry && jentry.body);
 ok("json 分支也带出方法与 URL",
-  jentry && jentry.method === "POST" && jentry.url === "/billing/meter/x", jentry);
+  jentry && jentry.method === "POST" && jentry.url === "https://example.test/billing/meter/x", jentry);
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 if (fail) process.exitCode = 1;

@@ -172,6 +172,9 @@
 .arow input[type=url]{width:100%;min-width:0;font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid var(--line);
   border-radius:7px;color:var(--ink)}
 .arow input[type=url]:focus{outline:none;border-color:var(--today);box-shadow:0 0 0 3px rgba(47,107,255,.1)}
+/* 平台地址由代码预置、面板内只读：视觉上也要和可编辑输入区分开 */
+.arow input[type=url][readonly]{background:#f8fafc;color:var(--ink-2);cursor:default}
+.arow input[type=url][readonly]:focus{border-color:var(--line);box-shadow:none}
 .arow .hintline{font-size:11px;color:var(--ink-3);margin-top:3px}
 @media(max-width:720px){
   /* 窄窗收窄名称列，给地址与按钮让出宽度；按钮组本身会自然换行 */

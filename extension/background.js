@@ -286,6 +286,16 @@ function registerAndOpen(agentId, origin, url) {
     });
   }
 
+  // 装钩子之前先确认这个域名确实属于该平台：直读平台（Qoder）的域名绝不能
+  // 被别家平台借去装钩子，两个平台也不能共用一个域名（归属会串账）。
+  return CreditStore.load().then(function (doc) {
+    var conflict = CreditAgents.originConflict(agentId, origin, doc.agents);
+    if (conflict) return { ok: false, error: conflict };
+    return openWithHook(agentId, origin, url);
+  });
+}
+
+function openWithHook(agentId, origin, url) {
   return register(origin).then(function (info) {
     return CreditStore.update(function (doc) {
       var a = doc.agents[agentId];
@@ -406,6 +416,13 @@ function endProbe(agentId, outcome) {
  *  UI 渲染同一个探针时调的是同一个函数，两边不可能再说出两句不同的话。 */
 function diagnoseProbe(p) { return CreditDiagnose.of(p); }
 
+/* 样本来源白名单：via 会被落盘、导出、渲染，而 entry 由页面伪造、导入文件也能手改。
+ * 只接受代码认识的几个值，别把任意字符串原样透传到 UI。 */
+var CAPTURE_VIAS = ["fetch", "xhr", "direct", "paste"];
+function captureVia(v) {
+  return CAPTURE_VIAS.indexOf(v) >= 0 ? v : "unknown";
+}
+
 function onCaptured(entry, sender, opts) {
   if (!entry || !entry.url) return Promise.resolve({ ok: false, reason: "empty" });
   var trusted = !!(opts && opts.trusted);
@@ -463,6 +480,28 @@ function storeCapture(agentId, entry, p) {
     // 66081 字节 / 66051 字符这种差额全是中文，面板上两个数字对不上会让人怀疑截断。
     p.endpointBytes = entry.bodyBytes || (entry.body ? String(entry.body).length : 0);
   }
+
+  /* 4xx/5xx 不是额度数据，不能入库。
+   * 反例（v0.3.32 修）：TRAE 的接口 URL 自带 entitlement，一个 401 JSON 的启发式
+   * 分数是 2，按旧逻辑会被当成候选存下，并成为同接口最新的一条。pickCapture 同接口
+   * 取最新，于是之后每次同步都选中这条 401、报 adapter-threw，把旁边可用的 200 样本
+   * 完全挡住。状态和体量已经记进探针了，诊断不受影响；这里只需要拒绝入库。 */
+  var httpStatus = Number(entry.status) || 0;
+  if (httpStatus >= 400) {
+    if (p) {
+      p.rejected++;
+      p.rejectUrls = p.rejectUrls || [];
+      if (p.rejectUrls.indexOf(abs) < 0) {
+        p.rejectUrls.push(abs);
+        if (p.rejectUrls.length > 5) p.rejectUrls.shift();
+      }
+      p.rejectReasons = p.rejectReasons || {};
+      var _hk = "HTTP " + httpStatus;
+      p.rejectReasons[_hk] = (p.rejectReasons[_hk] || 0) + 1;
+    }
+    return Promise.resolve({ stored: false, score: 0, url: abs, status: httpStatus, httpError: true });
+  }
+
   var clean = CreditNormalize.sanitizeCapture({
     url: abs, method: entry.method, status: entry.status,
     requestHeaders: {}, body: entry.body
@@ -499,7 +538,7 @@ function storeCapture(agentId, entry, p) {
   clean.agentId = agentId;
   clean.score = scored.score;
   clean.reasons = scored.reasons;
-  clean.via = entry.via;
+  clean.via = captureVia(entry.via);
 
   return CreditStore.update(function (doc) {
     var list = doc.captures || [];
@@ -615,7 +654,13 @@ function endpointScore(doc, url) {
  * 会再来一遍；真正的超时（10 分钟）才清掉 pending。
  */
 function settleAuthCapture(agentId, abs, entry, stored) {
-  if (!stored || !stored.score || entry.via === "paste") return Promise.resolve(null);
+  /* 401/403 的价值不在样本内容（几乎必然分数 0，根本不会入库），而在
+   * 「这个页面还没有登录态」这个结论。旧守卫要求 score > 0，于是 LobsterAI
+   * 这种接口 URL 不含积分类关键词、401 响应打分 0 的平台永远走不到下面的
+   * 401 分支——用户明明没登录，面板却一直停在「等待授权中」。
+   * 这里只放行 401/403；其它低分响应仍旧不参与授权收尾。 */
+  var authStatus = !!(entry && (entry.status === 401 || entry.status === 403));
+  if (!stored || (!stored.score && !authStatus) || entry.via === "paste") return Promise.resolve(null);
 
   return CreditStore.load().then(function (doc) {
     var a = doc.agents[agentId];
@@ -840,10 +885,20 @@ function doRefresh(agentId, opts) {
     }
 
     if (!a.consoleUrl) return { ok: false, error: "该平台还没授权，没有可打开的后台地址" };
+    /* origin 才是「真正授权过」的判据：consoleUrl 有代码预置的默认值，新装时
+     * 非直读平台的 origin 还是 null。不挡住的话 register(null) 会在 idsFor 里
+     * 同步抛错——既把 TypeError 原样甩给用户，又绕过下面的 .catch，让刚建的
+     * 探针永远留在 probeMem 里（下次诊断读到的是上一次的半截记录）。 */
     var origin = a.origin;
+    if (!origin) {
+      return { ok: false, agentId: agentId, error: "这个平台还没授权：先去「授权与样本」里点一次授权，有页面可读之后刷新才有意义" };
+    }
+    var conflict = CreditAgents.originConflict(agentId, origin, doc.agents);
+    if (conflict) return { ok: false, agentId: agentId, error: conflict };
     var probe = beginProbe(agentId, "hook");
 
-    return register(origin).then(function (info) {
+    // 即使 register 内部同步抛错，也要落进下面的 .catch 去 endProbe。
+    return Promise.resolve().then(function () { return register(origin); }).then(function (info) {
       probe.worldAware = !!info.worldAware;
 
       // v0.3.18：adapter 给了代发配方（readFallback）的平台（WorkBuddy）不再先等
