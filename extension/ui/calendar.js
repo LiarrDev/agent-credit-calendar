@@ -216,8 +216,14 @@
       var ag = doc.agents[a];
       // 正在等登录的平台不算「没授权」，否则用户会同时看到「等待授权」和「还没授权」
       return ag.fetchMode === "unauthorized" && !authPendingLive(ag);
-    }).length;
-    if (IS_EXT && unauth) msgs.push("还有 <b>" + unauth + " 个平台</b>没授权，它们的数据只能手填。");
+    });
+    if (IS_EXT && unauth.length) {
+      // Qoder 是接口直读、没有「授权」这一步，不算在没授权里；点明它，免得
+      // 4 个平台只报 3 个看起来像漏数。
+      msgs.push("还有 <b>" + unauth.length + " 个平台</b>没授权（"
+        + unauth.map(function (id) { return esc(AG.byId(id).name); }).join("、")
+        + "），它们的数据只能手填；Qoder 走接口直读，不需要授权。");
+    }
     box.innerHTML = msgs.length
       ? '<div class="banner">' + msgs.join(" ") + "</div>" : "";
   }

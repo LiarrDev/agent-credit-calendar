@@ -1,9 +1,11 @@
-# Agent 积分过期日历 — 扩展（v0.3.30）
+# Agent 积分过期日历 — 扩展（v0.3.31）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v0.3.30，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v0.3.31，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v0.3.31 修 WorkBuddy「授权」后一直停在「等待授权中」：授权页加载完，扩展会主动在页面里代发一次额度请求，已登录就直接写入日历，不再只等 SPA 自己发（REQUIREMENTS 决策 31）。
 
 v0.3.20 修正到期日期并调整日历展示：
 

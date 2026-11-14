@@ -302,9 +302,44 @@ function registerAndOpen(agentId, origin, url) {
     }).then(function () { return info; });
   }).then(function (info) {
     return chrome.tabs.create({ url: url, active: true }).then(function (tab) {
+      var adapter = CreditAdapters.get(agentId);
+      var fallbackCfg = adapter && adapter.readFallback;
+      // 不 await：先把「已打开」回给 UI，页面加载完再在后台代发。
+      // WorkBuddy 的 SPA 不保证会自己请求额度接口（决策 28），授权流程只等它
+      // 就会一直停在「等待授权中」——用户明明已经登录了也看不到结果。
+      if (fallbackCfg) proactiveAuthSend(agentId, fallbackCfg, tab.id);
       return { ok: true, tabId: tab.id, worldAware: info.worldAware };
     });
   });
+}
+
+/**
+ * 授权页加载完主动代发一次（只对给了 readFallback 的平台，当前是 WorkBuddy）。
+ *
+ * 成功就复用 settleAuthCapture 收尾：syncOne 写入日历、清掉 authPending；
+ * 401/403 照旧留在等待里并提示登录。代发本身失败也不结束等待——页面自己
+ * 之后发额度请求时仍会走 onCaptured 自动收尾，这里只把失败原因写进面板。
+ */
+function proactiveAuthSend(agentId, cfg, tabId) {
+  return waitForTab(tabId, DIRECT_WAIT_MS).then(function () {
+    return pageSend(agentId, cfg, tabId, null);
+  }).then(function (fb) {
+    if (!fb) return null;
+    if (fb.ok || fb.needLogin) {
+      return settleAuthCapture(agentId, cfg.url, { via: "direct", status: fb.status || 0 }, {
+        stored: true, score: 1, url: cfg.url
+      });
+    }
+    return CreditStore.update(function (doc) {
+      var a = doc.agents[agentId];
+      if (!a || !a.authPending) return;
+      a.authResult = {
+        at: new Date().toISOString(), ok: false, reason: "send",
+        message: "授权页已打开，但自动代发没读到数据：" + (fb.message || "未知原因")
+          + "。页面自己发额度请求时仍会自动写入；也可以登录后点「重新打开页面」。"
+      };
+    });
+  }).catch(function () { /* 代发失败不影响授权流程本身 */ });
 }
 
 /* ---------- 捕获收件箱 ---------- */

@@ -311,6 +311,9 @@ function runRefresh(dropOnChanged, fastWait, scriptResults) {
     console.log("--- 场景 9：库满时别家平台的历史快照不能挤掉目标样本（v0.3.27）");
     return retentionChecks();
   }).then(function () {
+    console.log("--- 场景 10：授权页打开后主动代发（v0.3.31）");
+    return authSendChecks();
+  }).then(function () {
     console.log("\n" + pass + " passed, " + fail + " failed");
     process.exit(fail ? 1 : 0);
   }, function (e) {
@@ -715,5 +718,65 @@ function retentionChecks() {
       list.filter(function (c) { return c.url === WB || c.url === LOB; }).length);
     ok("容量：选样本仍能拿到目标接口", ctx.CreditAdapters.pickCapture(list, "trae").url === TARGET,
       ctx.CreditAdapters.pickCapture(list, "trae").url);
+  });
+}
+
+/**
+ * 场景 10：授权流程不再只等页面自己发额度接口。
+ *
+ * WorkBuddy 的 SPA 在授权页里也不保证会请求 get-user-resource-free-packages
+ * （决策 28），用户已经登录却一直停在「等待授权中」。现在授权页加载完会主动
+ * 代发一次，成功就收尾写日历；401 仍留在等待里等用户登录。
+ */
+function authSendChecks() {
+  var ext = createExt(false, true);
+  return new Promise(function (resolve) {
+    ext.send({ type: "REGISTER_AND_OPEN", agentId: "workbuddy",
+      origin: "https://www.workbuddy.cn", url: PAGE }, function (r) {
+      resolve({ r: r, mem: ext.mem, tabs: ext.tabs });
+    });
+  }).then(function (o) {
+    ok("授权：打开页面后立即返回，不等代发", !!(o.r && o.r.ok), o.r);
+    ok("授权：授权页在前台打开",
+      o.tabs.created.length === 1 && o.tabs.created[0].active === true &&
+        o.tabs.created[0].url === PAGE,
+      o.tabs.created);
+    return new Promise(function (res) { setTimeout(res, 400); }).then(function () { return o; });
+  }).then(function (o) {
+    var a = o.mem[KEY].agents.workbuddy;
+    ok("授权：已登录时代发成功，日历写入 3 笔批次",
+      (o.mem[KEY].batches || []).length === 3, (o.mem[KEY].batches || []).length);
+    ok("授权：成功后清掉等待状态", a.authPending === null, a.authPending);
+    ok("授权：面板显示最近一次授权完成",
+      !!(a.authResult && a.authResult.ok === true), a.authResult);
+    ok("授权：样本记为活读而不是粘贴",
+      (o.mem[KEY].captures || []).some(function (c) {
+        return c.agentId === "workbuddy" && c.via === "direct";
+      }), (o.mem[KEY].captures || []).map(function (c) { return c.via; }));
+    return needLoginOnAuthChecks();
+  });
+}
+
+function needLoginOnAuthChecks() {
+  var FAIL401 = {
+    ok: true, status: 401, finalUrl: API, contentType: "application/json",
+    body: JSON.stringify({ code: 401, msg: "unauthorized" }),
+    bodyBytes: 34, truncated: false, tokenFound: true
+  };
+  var ext = createExt(false, true, [FAIL401]);
+  return new Promise(function (resolve) {
+    ext.send({ type: "REGISTER_AND_OPEN", agentId: "workbuddy",
+      origin: "https://www.workbuddy.cn", url: PAGE }, function (r) {
+      resolve({ r: r, mem: ext.mem });
+    });
+  }).then(function (o) {
+    return new Promise(function (res) { setTimeout(res, 400); }).then(function () { return o; });
+  }).then(function (o) {
+    var a = o.mem[KEY].agents.workbuddy;
+    ok("授权未登录：仍然保持等待（登录后可继续）", !!a.authPending, a.authPending);
+    ok("授权未登录：面板直说页面没有登录态",
+      !!(a.authResult && a.authResult.reason === "auth"), a.authResult);
+    ok("授权未登录：绝不写空批次", (o.mem[KEY].batches || []).length === 0,
+      o.mem[KEY].batches);
   });
 }
