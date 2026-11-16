@@ -479,13 +479,26 @@
         el = document.createElement("div");
         el.className = "card";
         el.setAttribute("data-agent", s.agent);
+        have[s.agent] = el;
+        host.appendChild(el);
       }
-      // 只在位置不对时才搬，避免无谓的重新挂载
-      if (host.children[j] !== el) host.insertBefore(el, host.children[j] || null);
+      /* 排序只改 CSS order，绝不 insertBefore 搬节点。
+       * 把一个正在做 CSS 过渡的元素从 DOM 里摘下来再插回去，浏览器会直接取消它身上的
+       * 过渡 —— 余额逐位滚动当场僵在终值上，表现就是"数字整块跳、没滚"。
+       * 刷新一次余额常有两次渲染（storage.onChanged 一次、刷新回调一次），中间只要批次
+       * 变了导致"最近到期日"变化，卡片顺序就会变、节点就会被搬，动画正好死在这一下。
+       * #cards 是 display:grid，order 对它同样生效，视觉顺序照旧。 */
+      if (el.style && el.style.setProperty) el.style.setProperty("order", String(j));
       el.style.setProperty("--c", colorOf(s.agent));
       patchCard(el, cardInner(s), s.agent);
     }
-    while (host.children.length > list.length) host.removeChild(host.lastChild);
+    /* 多余的卡片按 agent 精确摘掉：DOM 顺序已经不等于视觉顺序，不能再按 lastChild 砍 */
+    var keep = {};
+    for (i = 0; i < list.length; i++) keep[list[i].agent] = true;
+    for (i = host.children.length - 1; i >= 0; i--) {
+      var c = host.children[i];
+      if (!keep[c.getAttribute("data-agent")]) host.removeChild(c);
+    }
   }
 
   function timeText(s) {

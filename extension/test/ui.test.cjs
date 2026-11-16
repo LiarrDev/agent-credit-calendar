@@ -755,6 +755,18 @@ booted(ui).then(function (ext) {
     });
   });
 }).then(function () {
+  /* 卡片排序必须走 CSS order，不能 insertBefore 搬节点：
+   * DOM 桩没有 children/insertBefore，走的是整块重写路径，跑不到这段代码，
+   * 所以这里直接对源码做断言，把「别搬节点」这条约束钉住。
+   * 搬节点会让正在跑的 .rcol transform 过渡被浏览器直接取消 —— 余额整块跳、不再逐位滚。 */
+  var js = fs.readFileSync(path.join(ROOT, "ui/calendar.js"), "utf8");
+  var start = js.indexOf("function renderCards()");
+  var body = js.slice(start, js.indexOf("\n  function timeText", start));
+  ok("卡片排序用 CSS order，不搬 DOM 节点（否则会取消正在跑的滚动过渡）",
+    !/host\.insertBefore\s*\(/.test(body) && /setProperty\("order"/.test(body),
+    body.slice(0, 200));
+  ok("多余卡片按 data-agent 精确摘除，不靠 lastChild 砍",
+    /keep\[c\.getAttribute\("data-agent"\)\]/.test(body), body.slice(-260));
   console.log("\n" + pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
 }, function (e) {

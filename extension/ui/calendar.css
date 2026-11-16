@@ -85,15 +85,25 @@
     display:inline-flex;align-items:center;justify-content:center;color:var(--ink-3)}
   .card-refresh:hover{color:var(--today);border-color:#c7d2fe;background:#f8faff}
   .card-refresh:disabled{opacity:.5;cursor:default;background:#fff}
-  .balance{--rh:27px;font-size:23px;font-weight:660;letter-spacing:-.4px;line-height:var(--rh)}
-  .balance .u{font-size:12px;font-weight:500;color:var(--ink-3);margin-left:4px}
+  /* 等宽数字 + 收紧字距，两件事是一套的，别单独改其中一个：
+     逐位滚动的每一列都按「0-9 里最宽的那个」预留宽度（比例字体下 `1` 只有约 11px、
+     `0` 有 14.6px），于是 `1` 的格子右边空出 3px，看起来像数字中间被塞了空格。
+    换 tabular-nums 后所有数字同宽（14.44px），格子不再比字形宽，多出来的宽度由
+      -1.2px 字距收回去。实测 `1,697`：纯文本 57.08 → 59.48，滚动版 59.50，两者一致，
+     数字之间也不会再疏密不均。附带好处：余额变化时整块宽度不再跟着抖。 */
+  .balance{--rh:27px;font-size:23px;font-weight:660;letter-spacing:-1.2px;line-height:var(--rh);
+    font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+  /* 单位标签是中文，跟着 -1.2px 会挤在一起，单独还原成原来的 -.4px */
+  .balance .u{font-size:12px;font-weight:500;color:var(--ink-3);margin-left:4px;letter-spacing:-.4px}
   /* 098 · 余额逐位滚动：每个数字是一列 0-9，--d 是当前位数，整列上移 d 行。
      行高统一走 --rh，字号和 .balance 的 line-height 改一处就够，不会错位。 */
   .roll{display:inline-flex;align-items:flex-start;height:var(--rh);overflow:hidden;vertical-align:top}
   .rslot{display:inline-block;height:var(--rh);overflow:hidden}
   .rcol{display:flex;flex-direction:column;transform:translateY(calc(var(--d,0) * var(--rh) * -1));
     transition:transform .8s cubic-bezier(.3,1.18,.5,1);transition-delay:calc(var(--i,0) * 38ms)}
-  .rcol i{display:block;height:var(--rh);line-height:var(--rh);font-style:normal}
+  /* text-align:center 是兜底：万一拿不到 tnum（换字体/系统字体缺特性），
+     格子会比字形宽，居中后空隙均分在两侧，不会全堆在右边像多打了个空格 */
+  .rcol i{display:block;height:var(--rh);line-height:var(--rh);font-style:normal;text-align:center}
   .rfix{display:inline-block;height:var(--rh);line-height:var(--rh)}
   /* 位数/小数点变了没法逐位滚（会串位），但也不能"啪"地跳 —— 给一个短切换 */
   .roll.swap{animation:rollSwap .26s ease-out}
