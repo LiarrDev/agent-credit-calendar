@@ -379,7 +379,9 @@ booted(ui).then(function (ext) {
       var t = ext.el("#toast").textContent;
       ok("同步提示：临时抓取要明说「读完已注销」", t.indexOf("临时装钩子，读完已注销") >= 0, t);
       ok("同步提示：不再把临时抓取说成「没装钩子」", t.indexOf("没装钩子") < 0, t);
-      ok("同步提示：按钮已复位", btn.disabled === false && btn.textContent === "立即同步",
+      // v0.3.36 起按钮自己变进度条：跑完先收成对勾、再展开"已同步"，文案不再是"立即同步"。
+      // 这里要钉的是「不能卡在加载态」：已经能再点，且不再显示"同步中"。
+      ok("同步提示：按钮已复位", btn.disabled === false && btn.textContent.indexOf("同步中") < 0,
         { disabled: btn.disabled, text: btn.textContent });
     });
   });

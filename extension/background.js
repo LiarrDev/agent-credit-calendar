@@ -1632,6 +1632,18 @@ function syncOne(agentId, now) {
  * 临时装一次钩子（读完立刻注销，hookActive 保持 false）。决策 18 的边界没变：
  * 同步绝不把钩子留成常驻；改变的只是「用户亲手点这一下时，愿不愿意短暂装一次」。
  */
+
+/* 「立即同步」按钮会把自己的底色变成进度条，所以逐个平台把真实进度广播出去。
+ * 进度只能来自这里：一个平台要开页/代发/解析/入库，耗时差好几倍，
+ * 页面上自己按时间估的曲线会和实际完全对不上。
+ * 发给自己没有监听者时会拿到 lastError，显式吞掉——进度是锦上添花，不能影响同步。 */
+function emitSyncProgress(p) {
+  if (!chrome.runtime || typeof chrome.runtime.sendMessage !== "function") return;
+  try {
+    chrome.runtime.sendMessage(p, function () { void chrome.runtime.lastError; });
+  } catch (e) { /* 没有页面在听就算了 */ }
+}
+
 function syncAll(now) {
   return CreditStore.load().then(function (doc) {
     var ids = Object.keys(doc.agents).filter(function (id) {
@@ -1651,11 +1663,16 @@ function syncAll(now) {
           : "还没有授权任何平台。可以先手动录入，或在「授权与样本」里走授权截获。"
       };
     }
+    emitSyncProgress({ type: "SYNC_PROGRESS", phase: "start", total: ids.length });
     return ids.reduce(function (chain, id) {
       return chain.then(function (acc) {
         // 活体语义：直读平台先页面内请求一次；钩子还在的平台开页刷一份；
         // 钩子已解除的平台临时装一次、读完立刻注销（不改变 hookActive）。
         // 刷不到（best-effort）就照旧用最近样本，结果里标 fresh=false 让 UI 说清楚。
+        emitSyncProgress({
+          type: "SYNC_PROGRESS", phase: "agent",
+          index: acc.results.length, total: ids.length, agentId: id
+        });
         return CreditStore.load().then(function (d) {
           var adapter = CreditAdapters.get(id);
           var isDirect = !!(adapter && adapter.direct);
@@ -1680,11 +1697,17 @@ function syncAll(now) {
             if (fr.direct) r.direct = true;
             if (fr.ephemeral) r.ephemeral = true;
             if (fr.refreshError) r.refreshError = fr.refreshError;
-            acc.results.push(r); return acc;
+            acc.results.push(r);
+            emitSyncProgress({
+              type: "SYNC_PROGRESS", phase: "done",
+              done: acc.results.length, total: ids.length, agentId: id, ok: !!r.ok
+            });
+            return acc;
           });
         });
       });
     }, Promise.resolve({ results: [] })).then(function (acc) {
+      emitSyncProgress({ type: "SYNC_PROGRESS", phase: "end", total: ids.length });
       var okN = acc.results.filter(function (r) { return r.ok; }).length;
       return {
         ok: okN > 0, ran: acc.results.map(function (r) { return r.agentId; }),

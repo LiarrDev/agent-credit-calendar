@@ -1513,14 +1513,111 @@
 
   /* ---------- 同步 ---------- */
 
+  /* 004：按钮自己变成进度条。
+   * 状态机 idle → run（底色填充 + "同步中 2/4"）→ fold（收成一个对勾）→ done（"已同步"）→ idle。
+   * 进度值只认后台广播的 SYNC_PROGRESS：一个平台要开页/代发/解析/入库，耗时差好几倍，
+   * 在页面上按时间估一条曲线看着顺，但它会骗人 —— 用户以为卡住的时候其实还在跑。 */
+  var syncBtn = $("#sync");
+  var syncLb = syncBtn && syncBtn.querySelector ? syncBtn.querySelector(".lb") : null;
+  var syncLive = syncBtn && syncBtn.querySelector ? syncBtn.querySelector("#syncLive") : null;
+  var SYNC_W = { run: 116, fold: 38, done: 98 };
+  var syncSt = null, syncTimer = 0, syncWatch = 0;
+
+  function syncStyle(prop, val) {
+    if (syncBtn.style && typeof syncBtn.style.setProperty === "function") syncBtn.style.setProperty(prop, val);
+  }
+  function syncLabel(t) {
+    // DOM 桩里没有 .lb 子节点，退回直接写按钮文本
+    if (syncLb) syncLb.textContent = t; else syncBtn.textContent = t;
+    if (syncLive) syncLive.textContent = t;
+  }
+  function syncRun() {
+    clearTimeout(syncTimer);
+    syncSt = "run";
+    syncBtn.setAttribute("data-st", "run");
+    syncBtn.style.width = SYNC_W.run + "px";
+    syncBtn.disabled = true;
+    syncStyle("--p", "0");
+    syncLabel("同步中…");
+    /* 兜底：后台要是因为睡死/标签页被关掉而永远不回话，按钮会卡在"同步中"再也好不了。
+     * 90 秒还没消息就自己收尾，让人能再点一次。 */
+    clearTimeout(syncWatch);
+    syncWatch = setTimeout(function () {
+      if (syncSt !== "run") return;
+      toast("同步超过 90 秒还没回来，先停在这里；可以再点一次重试");
+      syncFail();
+    }, 90000);
+  }
+  /* phase: start / agent / done / end。agent 是"正要开始"，done 才是"这个平台跑完了"。 */
+  function syncStep(msg) {
+    if (syncSt !== "run" || !msg) return;
+    var total = msg.total || 0;
+    if (!total) return;
+    var done = msg.phase === "done" ? msg.done : (msg.index || 0);
+    syncStyle("--p", String(Math.max(0, Math.min(1, done / total))));
+    // 刚开始那个平台先报出来：4 个平台里第一个可能就要等十几秒，不写等着像没反应
+    syncLabel(msg.phase === "agent"
+      ? "同步中 " + (done + 1) + "/" + total
+      : "同步中 " + done + "/" + total);
+  }
+  function syncDone(ok) {
+    if (syncSt !== "run") return;
+    clearTimeout(syncWatch);
+    syncStyle("--p", "1");
+    if (!ok) { syncFail(); return; }
+    // 收尾这段只是状态展示，按钮立刻恢复可点：不然"已完成"还锁着三秒，用户会以为卡住
+    syncBtn.disabled = false;
+    syncSt = "fold";
+    syncBtn.setAttribute("data-st", "fold");
+    syncBtn.style.width = SYNC_W.fold + "px";
+    syncLabel("同步完成");
+    syncTimer = setTimeout(function () {
+      if (syncSt !== "fold") return;
+      syncSt = "done";
+      syncBtn.setAttribute("data-st", "done");
+      syncBtn.style.width = SYNC_W.done + "px";
+      syncLabel("已同步");
+      syncTimer = setTimeout(syncReset, 2600);
+    }, 640);
+  }
+  function syncFail() {
+    clearTimeout(syncWatch);
+    if (syncSt !== "run") { syncReset(); return; }
+    syncSt = "fail";
+    syncBtn.setAttribute("data-st", "fail");
+    syncBtn.style.width = SYNC_W.done + "px";
+    syncBtn.disabled = false;
+    syncLabel("同步失败");
+    syncTimer = setTimeout(syncReset, 2400);
+  }
+  function syncReset() {
+    clearTimeout(syncTimer);
+    clearTimeout(syncWatch);
+    syncSt = null;
+    syncBtn.setAttribute("data-st", "");   // 空串不命中任何 [data-st="..."] 规则
+    syncBtn.style.width = "";
+    syncBtn.disabled = false;
+    syncStyle("--p", "0");
+    syncLabel("立即同步");
+  }
+
+  if (IS_EXT && chrome.runtime && chrome.runtime.onMessage && chrome.runtime.onMessage.addListener) {
+    chrome.runtime.onMessage.addListener(function (msg) {
+      // 不返回 true：这条只是广播，别把别人的响应截走
+      if (msg && msg.type === "SYNC_PROGRESS") syncStep(msg);
+    });
+  }
+
   $("#sync").onclick = function () {
-    var btn = this;
     if (!IS_EXT) { toast("预览模式不能抓取，请装成扩展后再同步"); return; }
-    btn.disabled = true; btn.textContent = "同步中…";
+    if (syncSt === "run") return;   // 正在跑，别叠第二次；收尾动画期间允许再点一次
+    syncRun();
     toast("正在逐个平台抓活数据；没装常驻钩子的平台会临时装一次、读完立刻注销（可能要等一分钟）");
     chrome.runtime.sendMessage({ type: "SYNC" }, function (r) {
-      btn.disabled = false; btn.textContent = "立即同步";
-      if (r && r.ok) {
+      if (chrome.runtime.lastError) { toast("后台没响应：" + chrome.runtime.lastError.message); syncFail(); return; }
+      if (!r) { toast("后台没回话"); syncFail(); return; }
+      syncDone(!!r.ok);
+      if (r.ok) {
         var t = (r.results || []).filter(function (x) { return x.ok; }).map(function (x) {
           return x.agentId + " 新增 " + x.added + "/更新 " + x.updated
             + (x.conflicts ? "，" + x.conflicts + " 笔待裁决" : "")

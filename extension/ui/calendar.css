@@ -28,6 +28,37 @@
   button.primary:hover{background:#2857d8;border-color:#2857d8}
   button.primary:disabled{opacity:.6;cursor:default}
   button.mini{padding:4px 9px;font-size:12px;border-radius:7px}
+  /* 004 · 「立即同步」自己变成进度条：同步时底色从左往右填（进度来自后台
+     逐个平台的真实进度，不是按时间估的曲线），跑完收成对勾再展开。
+     宽度由 JS 给：跑的时候要能放下"同步中 2/4"，收起来只剩一个圆。 */
+  #sync{position:relative;overflow:hidden;white-space:nowrap;
+    transition:width .45s cubic-bezier(.3,1.2,.5,1),background-color .25s,border-color .25s,padding .3s}
+  #sync .bar{position:absolute;left:0;top:0;bottom:0;width:100%;border-radius:8px 0 0 8px;
+    background:linear-gradient(90deg,#3f7bff,#6fa4ff);
+    transform:scaleX(var(--p,0));transform-origin:0 50%;transition:transform .55s ease-out,opacity .3s;pointer-events:none}
+  /* 一个平台可能要跑十几秒，进度值不变的时候得让人看出"还在动"——只做光带，不改进度 */
+  #sync[data-st="run"] .bar::after{content:"";position:absolute;inset:0;border-radius:inherit;
+    background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.3) 50%,transparent 65%);
+    background-size:220% 100%;animation:syncShine 2.4s linear infinite}
+  @keyframes syncShine{from{background-position:120% 0}to{background-position:-80% 0}}
+  #sync .lb{position:relative;display:inline-block;font-variant-numeric:tabular-nums}
+  #sync .ck{position:relative;display:none;vertical-align:-2px}
+  #sync .ck svg{width:14px;height:14px;display:block;fill:none;stroke:currentColor;
+    stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+  #sync[data-st="run"]{background:#1f4fc4;border-color:#1f4fc4;color:#fff;opacity:1;cursor:default}
+  #sync[data-st="run"]:hover{background:#1f4fc4;border-color:#1f4fc4}
+  #sync[data-st="fold"],#sync[data-st="done"],#sync[data-st="fail"]{color:#fff;opacity:1}
+  #sync[data-st="fold"] .bar,#sync[data-st="done"] .bar,#sync[data-st="fail"] .bar{opacity:0}
+  #sync[data-st="fold"]{background:#0f9d76;border-color:#0f9d76;padding:7px 11px}
+  #sync[data-st="done"]{background:#0f9d76;border-color:#0f9d76}
+  #sync[data-st="done"] .ck{margin-right:5px}
+  #sync[data-st="fail"]{background:#c2410c;border-color:#c2410c}
+  #sync[data-st="fold"] .lb{display:none}
+  #sync[data-st="fold"] .ck,#sync[data-st="done"] .ck{display:inline-block}
+  @media(prefers-reduced-motion:reduce){
+    #sync,#sync .bar{transition:none}
+    #sync .bar::after{display:none}
+  }
   .gh-link{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:8px;color:var(--ink-2);transition:.15s}
   .gh-link:hover{background:#fafbfc;border-color:#d6dbe4;color:var(--ink)}
   .gh-link svg{width:18px;height:18px;fill:currentColor;display:block}

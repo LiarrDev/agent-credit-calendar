@@ -82,13 +82,18 @@ function sendResult(body, status) {
 function createExt(seed, wbStatus) {
   var mem = {}, onChanged = [], listeners = [], tabSeq = 1000;
   var tabUrl = {};
-  var log = { registered: [], unregistered: [], created: [], removed: [], fg: 0 };
+  var log = { registered: [], unregistered: [], created: [], removed: [], fg: 0, progress: [] };
 
   var chrome = {
     runtime: {
       lastError: null,
       getURL: function (p) { return "chrome-extension://test/" + p; },
       onMessage: { addListener: function (fn) { listeners.push(fn); }, removeListener: function () {} },
+      // 「立即同步」按钮靠这条广播把自己的底色变成进度条（v0.3.36）
+      sendMessage: function (msg, cb) {
+        if (msg && msg.type === "SYNC_PROGRESS") log.progress.push(msg);
+        if (typeof cb === "function") cb();
+      },
       onInstalled: { addListener: function () {} },
       onStartup: { addListener: function () {} }
     },
@@ -284,6 +289,32 @@ function main() {
         });
       });
     });
+  }).then(progressChecks);
+}
+
+function progressChecks() {
+  console.log("--- 场景 5：「立即同步」逐个平台的真实进度广播（v0.3.36）");
+  var ext = createExt(seedWith(false));
+  return ext.sync().then(function () {
+    var p = ext.log.progress;
+    ok("进度：先发 start", !!(p[0] && p[0].phase === "start"), p[0]);
+    ok("进度：最后发 end", !!(p.length && p[p.length - 1].phase === "end"), p[p.length - 1]);
+
+    var agents = p.filter(function (x) { return x.phase === "agent"; });
+    var dones = p.filter(function (x) { return x.phase === "done"; });
+    var total = p[0] && p[0].total;
+    ok("进度：平台数和总批次数一致", agents.length === total && dones.length === total,
+      { agents: agents.length, dones: dones.length, total: total });
+    // 按钮上的 "2/4" 就是这两个字段算出来的：agent 用 0 基 index，done 用累计完成数
+    ok("进度：agent 的 index 从 0 递增", agents.every(function (x, i) { return x.index === i; }),
+      agents.map(function (x) { return x.index; }));
+    ok("进度：done 从 1 累加到总数", dones.every(function (x, i) { return x.done === i + 1; }),
+      dones.map(function (x) { return x.done; }));
+    ok("进度：每个事件都带平台 id", p.filter(function (x) { return x.phase !== "end" && x.phase !== "start"; })
+      .every(function (x) { return typeof x.agentId === "string" && x.agentId; }),
+      p.map(function (x) { return x.phase + ":" + (x.agentId || "-"); }));
+    ok("进度：done 带上这次是否成功", dones.every(function (x) { return typeof x.ok === "boolean"; }),
+      dones.map(function (x) { return x.ok; }));
   });
 }
 
