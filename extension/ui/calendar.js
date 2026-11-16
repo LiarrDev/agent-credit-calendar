@@ -230,6 +230,225 @@
 
   /* ---------- 总览卡片 ---------- */
 
+  /* 098 · 余额逐位滚动。
+   * 同步完成后余额是「跳变」的：数字一换，用户只能靠右上角时间戳确认数据真的更新过。
+   * 这里把每个数字换成一列 0-9，值变了就整列上移到新位、按位错开 38ms。
+   * 位置不变的数字不动，所以"改了一位"和"改了全部"看得出区别。
+   * 注意这里不做历史走势线：页面只存当前余额，没有快照序列，画出来是假数据。 */
+  var RM = typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false;
+  var lastBal = {};   // agentId -> 上次画出来的余额文本
+
+  /* .balance 里"数字部分"的纯文本。滚动列建好之后这里已经没有直接文本节点了，
+   * 所以只在新建/重绘时读，别指望随时能读回当前值。 */
+  function balText(node) {
+    var t = "";
+    for (var n = node.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) t += n.nodeValue;
+    return t.replace(/\s+/g, "");
+  }
+
+  function applyBalance(bal, id, txt) {
+    if (!bal || !txt) return;
+    var prev = lastBal[id];
+    lastBal[id] = txt;
+    paintRoll(bal, txt, prev);
+  }
+
+  function enhanceBalances() {
+    var cards = document.querySelectorAll ? document.querySelectorAll("#cards .card[data-agent]") : [];
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i], bal = card.querySelector && card.querySelector(".balance");
+      if (!bal) continue;
+      applyBalance(bal, card.getAttribute("data-agent"), balText(bal));
+    }
+  }
+
+  /* 滚到位分两步：先无过渡地落到起点、强制一帧、再改成目标值。
+   * 同一帧里改两次会被合成一次，动画根本不会发生。 */
+  function rollTo(bal, moved) {
+    if (!moved.length) return;
+    moved.forEach(function (m) {
+      m.col.style.transition = "none";
+      m.col.style.setProperty("--d", m.from);
+    });
+    void bal.offsetWidth;
+    moved.forEach(function (m) {
+      m.col.style.transition = "";
+      m.col.style.setProperty("--d", m.to);
+    });
+  }
+
+  /* 把 .balance 里的纯文本换成滚动列。只清数字文本节点，后面的单位标签原样留着；
+   * 同时补一个 .sr 给读屏用 —— 不然读屏会把每列 0-9 全念一遍。
+   *
+   * 结构没变（位数、小数点、千分位都一样）时必须复用现有的列，只改 --d：
+   * 重建节点会把正在跑的动画一起扔掉。而刷新一次余额，页面恰好会连着重绘两次
+   * （storage.onChanged 一次、刷新回调一次），第二遍就足以把动画抹平 ——
+   * 用户看到的就是"数字瞬间跳变、完全没滚"。 */
+  function paintRoll(bal, txt, prev) {
+    if (!document.createElement || !bal.querySelector) return;
+    var mask = txt.replace(/\d/g, "#");
+    var wrap = bal.querySelector(".roll");
+    var label = bal.querySelector(".u");
+
+    if (wrap && wrap.getAttribute("data-mask") === mask) {
+      var slots = wrap.querySelectorAll(".rcol"), n = 0, moved = [];
+      for (var i = 0; i < txt.length; i++) {
+        var d = txt.charCodeAt(i) - 48;
+        if (d < 0 || d > 9) continue;
+        var col = slots[n++];
+        if (!col || !col.style || !col.style.getPropertyValue) break;
+        var to = String(d), from = col.style.getPropertyValue("--d");
+        if (from !== to) moved.push({ col: col, from: from || to, to: to });
+      }
+      rollTo(bal, moved);
+      var sr0 = bal.querySelector(".sr");
+      if (sr0) sr0.textContent = txt;
+      return;
+    }
+
+    /* 结构变了就整体重建：位数或标点一变还逐位滚，后面的数字会全带歪。 */
+    if (wrap && wrap.parentNode === bal) bal.removeChild(wrap);
+    var srOld = bal.querySelector(".sr");
+    if (srOld && srOld.parentNode === bal) bal.removeChild(srOld);
+    for (var t = bal.firstChild; t;) {
+      var nx = t.nextSibling;
+      if (t.nodeType === 3) bal.removeChild(t);
+      t = nx;
+    }
+
+    var animate = !!prev && !RM && prev.replace(/\d/g, "#") === mask;
+    var out = document.createElement("span");
+    // 结构变了不能逐位滚，但也别"啪"地跳：给一个短切换，让"变过"这件事看得见
+    out.className = prev && prev !== txt && !RM ? "roll swap" : "roll";
+    out.setAttribute("aria-hidden", "true");
+    out.setAttribute("data-mask", mask);
+    var cols = [];
+    for (var k = 0; k < txt.length; k++) {
+      var ch = txt.charAt(k), dg = ch.charCodeAt(0) - 48;
+      if (dg >= 0 && dg <= 9) {
+        var slot = document.createElement("span");
+        slot.className = "rslot";
+        var col2 = document.createElement("span");
+        col2.className = "rcol";
+        col2.style.setProperty("--i", String(k));
+        for (var q = 0; q < 10; q++) {
+          var cell = document.createElement("i");
+          cell.textContent = String(q);
+          col2.appendChild(cell);
+        }
+        slot.appendChild(col2);
+        out.appendChild(slot);
+        cols.push({ col: col2, to: ch, from: animate ? prev.charAt(k) : ch });
+      } else {
+        var fix = document.createElement("span");
+        fix.className = "rfix";
+        fix.textContent = ch;
+        out.appendChild(fix);
+      }
+    }
+
+    var sr = document.createElement("span");
+    sr.className = "sr";
+    sr.textContent = txt;
+    if (label) {
+      // 读屏顺序跟着视觉走：先数字、再单位标签
+      bal.insertBefore(out, label);
+      bal.insertBefore(sr, label);
+    } else {
+      bal.appendChild(out);
+      bal.appendChild(sr);
+    }
+
+    if (animate) rollTo(bal, cols.filter(function (c) { return c.from !== c.to; }));
+    else cols.forEach(function (c) { c.col.style.transition = "none"; c.col.style.setProperty("--d", c.to); });
+  }
+
+  /* 卡片的内部 HTML（不含外层 .card，外层由 renderCards 负责建/复用） */
+  function cardInner(s) {
+    var m = AG.MODE_LABEL[s.fetchMode] || ["未知", "u"];
+    // 授权页已经打开、还没等到目标接口时优先显示「授权中」：
+    // 页面顺带发的其他接口也会让 fetchMode 变成 capture，但那还不是授权完成。
+    if (authPendingLive(doc.agents[s.agent] || {})) {
+      m = ["授权中", "h"];
+    }
+    var cd;
+    if (!s.soonest) cd = '<span class="cd none">无有效积分</span>';
+    else {
+      var d = N.daysLeft(s.soonest.expiresAt, TODAY);
+      var k = d <= 2 ? "hot" : d <= 7 ? "warm" : "cool";
+      cd = '<span class="cd ' + k + '">' + (d === 0 ? "今天到期" : "还有 " + d + " 天") + "</span>";
+    }
+    return '<div class="card-head"><span class="agent-name" data-act="console" data-agent="' + s.agent + '" title="打开 ' + esc(s.name) + ' 后台">'
+      + esc(s.name) + '<span class="ext" aria-hidden="true">↗</span></span>'
+      + '<span class="card-acts">'
+      + (IS_EXT
+        ? '<button type="button" class="card-refresh" data-act="refresh" data-id="' + s.agent
+          + '" title="刷新 ' + esc(s.name) + ' 余额" aria-label="刷新 ' + esc(s.name) + ' 余额">↻</button>'
+        : "")
+      + '<span class="chip ' + m[1] + '">' + m[0] + "</span></span></div>"
+      + (s.count
+        ? '<div class="balance">' + fmt(s.unit, s.total) + '<span class="u">' + unitLabel(s.unit) + " 可用</span></div>"
+        : '<div class="balance" style="color:var(--ink-3)">0<span class="u">' + unitLabel(s.unit) + "</span></div>")
+      + (s.soonest
+        ? '<div class="next">最近一笔 <b>' + esc(shortLbl(s.soonest.label)) + "</b> · "
+          + s.soonest.expiresAt.slice(5).replace("-", "/") + " 到期</div>" + cd
+        : '<div class="empty-b">当前无未过期批次</div>')
+      + '<div class="tstamp">' + (s.count
+          ? s.count + " 个批次 · " + timeText(s)
+          : '0 个批次 · <span class="mn">还没有数据</span>')
+      + (s.conflicts ? ' <span class="badge" data-act="conflicts" data-agent="' + s.agent + '">'
+          + s.conflicts + " 笔待裁决</span>" : "") + "</div>"
+      + (s.wastedCount
+        ? '<div class="wasted" data-act="wasted" data-agent="' + s.agent + '">'
+          + "已过期未用完 <b>" + fmt(s.unit, s.wasted) + unitTail(s.unit) + "</b>（" + s.wastedCount + " 笔）"
+          + '<span class="ar">查看 ›</span></div>'
+        : "")
+      // 第三种状态必须自己占一行：不是余额、也不是"过期作废"。
+      // 不写出来的话，用户只会看到"刷新了但余额没变"，然后去后台发现对不上。
+      + (s.goneCount
+        ? '<div class="wasted" data-act="closed" data-agent="' + s.agent + '">'
+          + "已不在后台返回 <b>" + fmt(s.unit, s.goneSum) + unitTail(s.unit) + "</b>（"
+          + s.goneCount + " 笔 · 已从余额剔除）"
+          + '<span class="ar">查看 ›</span></div>'
+        : "")
+      + "";
+  }
+
+  /* 单位标签和零余额的灰色内联样式，可能单独变，跟着一起同步 */
+  function syncBalance(k, n) {
+    var ns = n.getAttribute("style"), ks = k.getAttribute("style");
+    if ((ns || "") !== (ks || "")) {
+      if (ns === null) k.removeAttribute("style");
+      else k.setAttribute("style", ns);
+    }
+    var nu = n.querySelector(".u"), ku = k.querySelector(".u");
+    if (nu && ku && nu.textContent !== ku.textContent) ku.textContent = nu.textContent;
+  }
+
+  /* 按 agent 对位更新卡片，而不是每次把 #cards 整块 innerHTML 换掉：
+   * 换掉的话 .balance 里的滚动列会连节点一起消失，动画自然看不到。 */
+  function patchCard(el, want, id) {
+    var tmp = document.createElement("div");
+    tmp.innerHTML = want;
+    var next = [], cur = [], i;
+    for (i = 0; i < tmp.childNodes.length; i++) next.push(tmp.childNodes[i]);
+    for (i = 0; i < el.childNodes.length; i++) cur.push(el.childNodes[i]);
+
+    var val = null;
+    for (i = 0; i < next.length; i++) {
+      var n = next[i], k = cur[i];
+      var nb = n.nodeType === 1 && n.classList && n.classList.contains("balance");
+      var kb = k && k.nodeType === 1 && k.classList && k.classList.contains("balance");
+      if (nb) val = balText(n);
+      if (nb && kb) { syncBalance(k, n); continue; }
+      if (k && k.outerHTML === n.outerHTML) continue;
+      if (k) el.replaceChild(n, k); else el.appendChild(n);
+    }
+    while (el.childNodes.length > next.length) el.removeChild(el.lastChild);
+    applyBalance(el.querySelector(".balance"), id, val);
+  }
+
   function renderCards() {
     var list = ORDER().map(agentSummary);
     list.sort(function (x, y) {
@@ -238,56 +457,35 @@
       return dx - dy;
     });
 
-    $("#cards").innerHTML = list.map(function (s) {
-      var m = AG.MODE_LABEL[s.fetchMode] || ["未知", "u"];
-      // 授权页已经打开、还没等到目标接口时优先显示「授权中」：
-      // 页面顺带发的其他接口也会让 fetchMode 变成 capture，但那还不是授权完成。
-      if (authPendingLive(doc.agents[s.agent] || {})) {
-        m = ["授权中", "h"];
+    var host = $("#cards");
+    /* 测试里的 DOM 桩没有 children/insertBefore，退回整块重写 */
+    var canPatch = !!(host.children && host.insertBefore && document.createElement
+      && document.createElement("div").childNodes);
+
+    if (!canPatch) {
+      host.innerHTML = list.map(cardInner).join("");
+      enhanceBalances();
+      return;
+    }
+
+    var have = {}, i;
+    for (i = 0; i < host.children.length; i++) {
+      var key = host.children[i].getAttribute("data-agent");
+      if (key) have[key] = host.children[i];
+    }
+    for (var j = 0; j < list.length; j++) {
+      var s = list[j], el = have[s.agent];
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "card";
+        el.setAttribute("data-agent", s.agent);
       }
-      var cd;
-      if (!s.soonest) cd = '<span class="cd none">无有效积分</span>';
-      else {
-        var d = N.daysLeft(s.soonest.expiresAt, TODAY);
-        var k = d <= 2 ? "hot" : d <= 7 ? "warm" : "cool";
-        cd = '<span class="cd ' + k + '">' + (d === 0 ? "今天到期" : "还有 " + d + " 天") + "</span>";
-      }
-      return '<div class="card" style="--c:' + colorOf(s.agent) + '">'
-        + '<div class="card-head"><span class="agent-name" data-act="console" data-agent="' + s.agent + '" title="打开 ' + esc(s.name) + ' 后台">'
-          + esc(s.name) + '<span class="ext" aria-hidden="true">↗</span></span>'
-        + '<span class="card-acts">'
-        + (IS_EXT
-          ? '<button type="button" class="card-refresh" data-act="refresh" data-id="' + s.agent
-            + '" title="刷新 ' + esc(s.name) + ' 余额" aria-label="刷新 ' + esc(s.name) + ' 余额">↻</button>'
-          : "")
-        + '<span class="chip ' + m[1] + '">' + m[0] + "</span></span></div>"
-        + (s.count
-          ? '<div class="balance">' + fmt(s.unit, s.total) + '<span class="u">' + unitLabel(s.unit) + " 可用</span></div>"
-          : '<div class="balance" style="color:var(--ink-3)">0<span class="u">' + unitLabel(s.unit) + "</span></div>")
-        + (s.soonest
-          ? '<div class="next">最近一笔 <b>' + esc(shortLbl(s.soonest.label)) + "</b> · "
-            + s.soonest.expiresAt.slice(5).replace("-", "/") + " 到期</div>" + cd
-          : '<div class="empty-b">当前无未过期批次</div>')
-        + '<div class="tstamp">' + (s.count
-            ? s.count + " 个批次 · " + timeText(s)
-            : '0 个批次 · <span class="mn">还没有数据</span>')
-        + (s.conflicts ? ' <span class="badge" data-act="conflicts" data-agent="' + s.agent + '">'
-            + s.conflicts + " 笔待裁决</span>" : "") + "</div>"
-        + (s.wastedCount
-          ? '<div class="wasted" data-act="wasted" data-agent="' + s.agent + '">'
-            + "已过期未用完 <b>" + fmt(s.unit, s.wasted) + unitTail(s.unit) + "</b>（" + s.wastedCount + " 笔）"
-            + '<span class="ar">查看 ›</span></div>'
-          : "")
-        // 第三种状态必须自己占一行：不是余额、也不是"过期作废"。
-        // 不写出来的话，用户只会看到"刷新了但余额没变"，然后去后台发现对不上。
-        + (s.goneCount
-          ? '<div class="wasted" data-act="closed" data-agent="' + s.agent + '">'
-            + "已不在后台返回 <b>" + fmt(s.unit, s.goneSum) + unitTail(s.unit) + "</b>（"
-            + s.goneCount + " 笔 · 已从余额剔除）"
-            + '<span class="ar">查看 ›</span></div>'
-          : "")
-        + "</div>";
-    }).join("");
+      // 只在位置不对时才搬，避免无谓的重新挂载
+      if (host.children[j] !== el) host.insertBefore(el, host.children[j] || null);
+      el.style.setProperty("--c", colorOf(s.agent));
+      patchCard(el, cardInner(s), s.agent);
+    }
+    while (host.children.length > list.length) host.removeChild(host.lastChild);
   }
 
   function timeText(s) {
