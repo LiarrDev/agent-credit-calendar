@@ -1,9 +1,18 @@
-# Agent 积分过期日历 — 扩展（v0.3.39）
+# Agent 积分过期日历 — 扩展（v1.0.0）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v0.3.39，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v1.0.0（首个正式版），Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v1.0.0 把版本号从 `0.3.39` 收束到 `1.0.0`，**功能与 v0.3.39 完全一致，没有行为变化**。
+0.x 阶段解决的是「四家平台能不能把批次数据稳定读回来」——四家 adapter 都照真实响应写成、
+抓取链路（直读 / 跨域截获 / 同源截获）、授权会话自动收尾、样本选样与判重、余额逐位滚动、
+冲突裁决与手动修正都已跑通并有回归覆盖；到 v0.3.39 这条主线不再有已知缺口，
+所以升到 1.0.0 表示**取数口径与存储结构（`CreditBatch` + `dedupKey`）就此冻结**：
+之后的 1.x 只做兼容性修复与体验打磨，不再改动文档结构与 adapter 契约，
+升级不需要迁移数据，也不需要重新授权。
+顺带把 README 里过期的测试计数补齐（862 → 873：`ui` 137→141、`sync-all` 22→29）。
 
 v0.3.39 「即将到期」的阈值从原生 select 换成会滑的分段控件（参考 047）。
 原来的 `<select>` 在右栏标题行里很扎眼：系统下拉箭头、原生焦点环、点开还挡内容，
@@ -267,7 +276,7 @@ adapters/lobsterai.js  LobsterAI 的 creditItems 映射（照 2026-10-22 真实�
 adapters/trae.js       TRAE 的额度包映射（照 2026-10-22 真实响应写的，有单测）
 adapters/workbuddy.js  WorkBuddy 的免费/赠送包映射 + 代发兜底配方（照真实响应与站点 bundle 写的，有单测）
 ui/calendar.html|css|js  日历界面
-test/*.test.cjs        node 单测，共 862 条断言（含 capture-main 的 XHR/相对 URL 回归、中继的
+test/*.test.cjs        node 单测，共 873 条断言（含 capture-main 的 XHR/相对 URL 回归、中继的
                        信任边界回归、探针诊断回归、130KB 截断样本升级回归、导入清洗回归、
                        非 2xx 样本与 origin 归属回归，以及 e2e-refresh 在 mock chrome 里跑通的
                        整条刷新链路、ui.test 用 DOM 桩钉住的页脚/清空确认/导入/看样本接线）
@@ -546,9 +555,9 @@ fetch 当异常，点该平台的「粘贴样本」：F12 → Network → 找到
 ## 我这边验过什么、没验什么
 
 跑过：`cd extension && npm test`（等价 `node test/run-all.cjs`），
-14 个文件共 **862 条断言**全部 0 失败：
+14 个文件共 **873 条断言**全部 0 失败：
 normalize 132、integration 112、adapters 102、workbuddy 69、diagnose 68、
-e2e-refresh 88、ui 137、trae 34、lobsterai 33、qoder 25、sync-all 22、
+e2e-refresh 88、ui 141、trae 34、lobsterai 33、qoder 25、sync-all 29、
 capture-main 18、capture-relay 12、ownership 10；
 所有 JS 过 `node --check`；
 浏览器端到端共 **247 条**（Qoder 41 / LobsterAI 67 / TRAE 62 / WorkBuddy 77），全部 0 失败；
