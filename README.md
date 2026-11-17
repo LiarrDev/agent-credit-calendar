@@ -43,6 +43,15 @@ Chrome MV3 浏览器扩展，无构建步骤，浏览器直接装载 `extension/
 cd extension && npm test
 ```
 
+## 注册福利
+
+本项目要读的四家平台，还没注册的话走下面的邀请链接可额外获得积分：
+
+- [WorkBuddy](https://www.workbuddy.cn/events/invite?inviteCode=i9ojz1rb2c)
+- [Qoder](https://qoder.com/activities?referral_code=XpEnCSJ1wQHLMXIozdPlzLSYmHSWUb1c)
+- [TRAE](https://www.trae.cn/events/code-fission/NMNMXE4QWUG7?utm_source=copy_link&utm_medium=code_fission)
+- [LobsterAI](https://lobsterai.youdao.com/#/index?keyfrom=invitation) — 邀请码：`hWPdpa`（登录时输入邀请码可额外获得 300 积分新人礼包）
+
 ## 边界
 
 - **全程只读**：不充值、不扣费、不改套餐，只读取平台返回的额度数据

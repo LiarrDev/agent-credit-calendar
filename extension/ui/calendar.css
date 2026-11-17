@@ -164,7 +164,8 @@
 
   /* ---------- right rail ---------- */
   .rail{display:flex;flex-direction:column;gap:14px}
-  .sec-h{padding:12px 14px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;justify-content:space-between}
+  .sec-h{padding:12px 14px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;
+    justify-content:space-between;gap:10px}
   .sec-h h3{margin:0;font-size:13.5px;font-weight:640}
   .sec-h .cnt{font-size:11.5px;color:var(--ink-3)}
   .sec-b{padding:6px 8px 10px}
@@ -177,8 +178,24 @@
   .row .amt{text-align:right;font-size:13px;font-weight:640;font-variant-numeric:tabular-nums}
   .row .amt small{display:block;font-weight:450;color:var(--ink-3);font-size:10.5px;margin-top:2px}
   .none-yet{padding:16px 12px;color:var(--ink-3);font-size:12.5px;text-align:center}
-  .thr{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-3)}
-  .thr select{font:inherit;font-size:11.5px;border:1px solid var(--line);border-radius:6px;padding:2px 4px;background:#fff;color:var(--ink-2)}
+  /* 047 · 会滑的分段控件（替换原来的原生 select）。
+     knob 用 left/right 两个值定位：往右切时 right 先动（.22s），left 延迟 40ms
+     用弹簧曲线追上，滑块被拉长再收回 —— 这一下拉伸就是"会滑"的来源。
+     位置全靠 calc 算（--i 只是列序号），不做 JS 测量、不监听 resize。 */
+  .seg{position:relative;display:grid;grid-template-columns:repeat(4,1fr);
+    padding:2px;border-radius:8px;background:var(--line-2);--i:0}
+  .seg .knob{position:absolute;top:2px;bottom:2px;border-radius:6px;background:var(--panel);
+    box-shadow:0 1px 2px rgba(16,24,40,.10),0 1px 1px rgba(16,24,40,.04);pointer-events:none;
+    left:calc(2px + (100% - 4px) * var(--i) / 4);
+    right:calc(2px + (100% - 4px) * (3 - var(--i)) / 4)}
+  .seg.go-r .knob{transition:right .22s cubic-bezier(.4,0,.2,1),left .4s cubic-bezier(.3,1.2,.5,1) .04s}
+  .seg.go-l .knob{transition:left .22s cubic-bezier(.4,0,.2,1),right .4s cubic-bezier(.3,1.2,.5,1) .04s}
+  .seg .so{position:relative;border:0;background:none;padding:3px 6px;border-radius:6px;
+    font-size:11.5px;font-weight:600;color:var(--ink-3);line-height:1.35;transition:color .22s}
+  .seg .so:hover{background:none;border-color:transparent;color:var(--ink-2)}
+  .seg .so[aria-checked="true"]{color:var(--ink)}
+  .seg .so:focus-visible{outline:2px solid var(--today);outline-offset:1px}
+  @media(prefers-reduced-motion:reduce){.seg.go-r .knob,.seg.go-l .knob{transition:none}}
 
   /* ---------- detail ---------- */
   .dt{padding:13px 14px}

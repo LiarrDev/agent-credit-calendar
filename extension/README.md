@@ -1,9 +1,30 @@
-# Agent 积分过期日历 — 扩展（v0.3.38）
+# Agent 积分过期日历 — 扩展（v0.3.39）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v0.3.38，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v0.3.39，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v0.3.39 「即将到期」的阈值从原生 select 换成会滑的分段控件（参考 047）。
+原来的 `<select>` 在右栏标题行里很扎眼：系统下拉箭头、原生焦点环、点开还挡内容，
+而且「阈值 3天」这行字和标题「即将到期」挤在同一行没有呼应。
+- 4 个选项（3/7/14/30 天）等宽排成一条，选中项背后一块白底 pill。
+- pill 用 `left` + `right` **两个值**定位（不是 `translateX`）：往右切时 `right`
+  先走 .22s、`left` 延迟 40ms 用弹簧曲线追上，滑块被拉长再收回——这一下拉伸
+  就是「会滑」的来源。实测 38.7px → 峰值 49px → 回落到 38.7px。
+- 位置全靠 `calc(2px + (100% - 4px) * var(--i) / 4)` 算，**不做 JS 测量、
+  不监听 resize**（047 原组件用 offsetLeft，窗口一改就得重排）。
+  实测 900px 窄视口下仍是单行、`scrollWidth - clientWidth = 0`、末项右边缘距轨道 2px。
+- 语义用 `role="radiogroup"` + `role="radio"` + `aria-checked`，方向键切换、
+  Tab 只在选中项停留。原来 `threshold` 的钳制逻辑保留（越界夹到 1..365）。
+- `setThr()` 带幂等判断：`renderUpcoming` 每次重绘都会调进来，不判重会把
+  正在跑的过渡反复重启（098 的余额滚动踩过同一个坑）。
+- 测试改动：DOM 桩里 `#thr` 没有 `querySelectorAll`、`style` 也是空对象，
+  `setThr` 会整段跳过，选中态测不到 → 改为源码级断言（选项集合、默认选中、
+  `renderUpcoming` 确实会调 `setThr`）+ 数据层断言；另外加了 `driveThr()` 辅助，
+  用一个最小的「被点中的选项」驱动点击链路，原本 3 处 `select.onchange.call()`
+  的写法随之改写（原「非法值回退 3 天」改为「越界值被夹到 365 / 0 被抬到 1」，
+  因为分段控件点不出非法值，但钳制代码仍要守住）。
 
 v0.3.38 修「刷新时余额整块跳、不逐位滚」：卡片重排会把正在跑的过渡直接掐掉。
 `renderCards()` 原来用 `host.insertBefore()` 搬卡片节点来换位置。DOM 里把一个正在做 CSS

@@ -46,7 +46,13 @@
       <div class="panel">
         <div class="sec-h">
           <h3>即将到期</h3>
-          <span class="thr">阈值 <select id="thr"><option value="3" selected>3 天</option><option value="7">7 天</option><option value="14">14 天</option><option value="30">30 天</option></select></span>
+          <div class="seg" id="thr" role="radiogroup" aria-label="未来多少天内到期">
+            <span class="knob" aria-hidden="true"></span>
+            <button type="button" class="so" role="radio" aria-checked="true" data-v="3">3天</button>
+            <button type="button" class="so" role="radio" aria-checked="false" data-v="7" tabindex="-1">7天</button>
+            <button type="button" class="so" role="radio" aria-checked="false" data-v="14" tabindex="-1">14天</button>
+            <button type="button" class="so" role="radio" aria-checked="false" data-v="30" tabindex="-1">30天</button>
+          </div>
         </div>
         <div class="sec-b" id="upcoming"></div>
       </div>

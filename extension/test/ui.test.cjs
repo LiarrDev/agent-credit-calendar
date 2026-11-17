@@ -153,6 +153,15 @@ function expiryBatch(id, day, instant, agent) {
 function rowIds(html) {
   return Array.from(html.matchAll(/data-bid="([^"]+)"/g), function (m) { return m[1]; });
 }
+/* 047 · 阈值分段控件：桩里 #thr 没有 querySelectorAll，点不到真实按钮，
+ * 所以造一个最小的"被点中的选项"，让 onclick 里的 closest(".so") 能拿到它。 */
+function driveThr(ext, v) {
+  var btn = {
+    getAttribute: function (k) { return k === "data-v" ? String(v) : null; },
+    closest: function (sel) { return sel === ".so" ? btn : null; }
+  };
+  ext.el("#thr").onclick({ target: btn });
+}
 function clickAct(ext, container, act, id) {
   var target = { getAttribute: function (name) { return name === "data-act" ? act : name === "data-id" ? id : null; } };
   ext.el(container).onclick({ target: { closest: function (s) { return s === "[data-act]" ? target : null; } } });
@@ -548,11 +557,22 @@ booted(ui).then(function (ext) {
   });
 }).then(function () {
   var html = fs.readFileSync(path.join(ROOT, "ui/calendar.html"), "utf8");
-  var options = html.match(/<select id="thr">([\s\S]*?)<\/select>/)[1];
-  ok("阈值选项包含 3/7/14/30 天", Array.from(options.matchAll(/value="(\d+)"/g), function (m) { return m[1]; }).join(",") === "3,7,14,30");
-  ok("HTML 默认选中 3 天", /value="3" selected/.test(options) && (options.match(/selected/g) || []).length === 1);
+  var js = fs.readFileSync(path.join(ROOT, "ui/calendar.js"), "utf8");
+  // v0.3.39 起阈值是自定义分段控件（047），不再是原生 select：选项靠 data-v，
+  // 选中态靠 aria-checked。控件内部不含嵌套 div，所以第一个 </div> 就是它的结束。
+  var seg = (html.match(/<div class="seg" id="thr"[\s\S]*?<\/div>/) || [""])[0];
+  ok("阈值选项包含 3/7/14/30 天",
+    Array.from(seg.matchAll(/data-v="(\d+)"/g), function (m) { return m[1]; }).join(",") === "3,7,14,30",
+    seg.slice(0, 120));
+  var sel3 = (seg.match(/<button[^>]*data-v="3"[^>]*>/) || [""])[0];
+  ok("HTML 默认选中 3 天",
+    /aria-checked="true"/.test(sel3) && (seg.match(/aria-checked="true"/g) || []).length === 1,
+    sel3);
+  // DOM 桩里 #thr 没有 querySelectorAll，setThr 会整段跳过，选中态测不到；
+  // 这里钉住"重绘时确实会去同步控件"，否则控件会永远停在初始那一格。
+  ok("renderUpcoming 把阈值同步到分段控件",
+    /function renderUpcoming\(\)[\s\S]{0,220}?setThr\(doc\.settings\.threshold\)/.test(js));
   return booted(createUi(null, "2026-10-23T12:00:00")).then(function (ext) {
-    ok("无存储时默认阈值为 3 天", ext.el("#thr").value === "3");
     ok("空列表文案使用 3 天", ext.el("#upcoming").innerHTML.includes("未来 3 天内无积分到期"));
   });
 }).then(function () {
@@ -574,7 +594,7 @@ booted(ui).then(function (ext) {
     ok("默认 3 天含今天和第 3 天，不含第 4 天", rowIds(ext.el("#upcoming").innerHTML).join(",") === "threshold-0,threshold-1");
     return [7, 14, 30, 3].reduce(function (previous, threshold) {
       return previous.then(function () {
-        var select = ext.el("#thr"); select.value = String(threshold); select.onchange.call(select);
+        driveThr(ext, threshold);
         return booted(ext).then(function () {
           var expected = { 3: 2, 7: 4, 14: 5, 30: 6 }[threshold];
           ok("切换 " + threshold + " 天立即更新逐笔列表", rowIds(ext.el("#upcoming").innerHTML).length === expected);
@@ -584,11 +604,19 @@ booted(ui).then(function (ext) {
     }, Promise.resolve()).then(function () {
       return booted(createUi(ext.mem[KEY], "2026-10-23T12:00:00"));
     }).then(function (reopened) {
-      ok("重新打开保留 3 天选择", reopened.el("#thr").value === "3");
-      var select = reopened.el("#thr"); select.value = "invalid"; select.onchange.call(select);
+      ok("重新打开保留 3 天选择", reopened.mem[KEY].settings.threshold === 3);
+      // 分段控件点不出非法值，但 data-v 被改坏、或将来接入别的入口时钳制仍要在：
+      // 阈值一旦坏掉「即将到期」会永久空白，用户只会以为"最近没有要过期的"。
+      driveThr(reopened, "9999");
       return booted(reopened).then(function () {
-        ok("非法阈值回退 3 天且不清空列表", reopened.mem[KEY].settings.threshold === 3
-          && reopened.el("#thr").value === "3" && rowIds(reopened.el("#upcoming").innerHTML).length === 2);
+        ok("越界阈值被压到 365 天", reopened.mem[KEY].settings.threshold === 365);
+        driveThr(reopened, "0");
+        return booted(reopened).then(function () {
+          ok("阈值 0 被抬到 1 天", reopened.mem[KEY].settings.threshold === 1);
+          ok("钳制后列表不为空（不会让人误以为没有要过期的）",
+            rowIds(reopened.el("#upcoming").innerHTML).length > 0,
+            reopened.el("#upcoming").innerHTML.slice(0, 120));
+        });
       });
     });
   });
@@ -612,7 +640,8 @@ booted(ui).then(function (ext) {
   var original = JSON.stringify(seed.batches);
   return booted(createUi(seed, day + "T12:00:00")).then(function (ext) {
     var cell = dayHtml(ext, day), tomorrow = dayHtml(ext, "2026-10-24"), past = dayHtml(ext, "2026-10-22");
-    ok("已有 14 天阈值不被新默认值覆盖", ext.el("#thr").value === "14");
+    ok("已有 14 天阈值不被新默认值覆盖", ext.mem[KEY].settings.threshold === 14,
+      ext.mem[KEY].settings.threshold);
     ok("同日同平台只显示一条", (cell.match(/data-agent="qoder"/g) || []).length === 1);
     ok("平台内合计保留小数、排除已关闭批次", cell.includes("</b> 175.75</div>") && cell.includes("Qoder · 4 笔"));
     ok("不同平台不合并金额", cell.includes('data-agent="trae"') && cell.includes("</b> 80</div>")

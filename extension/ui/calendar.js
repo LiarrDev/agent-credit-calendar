@@ -582,9 +582,41 @@
 
   /* ---------- 即将到期 ---------- */
 
+  /* 047 · 阈值分段控件的状态。滑块位置由 CSS 拿 --i 算，这里只负责"谁被选中、
+   * 往哪个方向滑"。DOM 桩里 #thr 既没有 querySelectorAll、style 也只是个空对象，
+   * 所以开头 guard 掉——测试环境整段跳过，碰不到真实 DOM。 */
+  var thrIdx = -1;
+
+  function setThr(v) {
+    var box = $("#thr");
+    if (!box || !box.querySelectorAll || !box.style || !box.style.setProperty) return;
+    var opts = [].slice.call(box.querySelectorAll(".so"));
+    if (!opts.length) return;
+    var idx = -1, i;
+    for (i = 0; i < opts.length; i++) {
+      if (parseInt(opts[i].getAttribute("data-v"), 10) === v) { idx = i; break; }
+    }
+    if (idx < 0) idx = 0;
+    // 值没变就一步不动：renderUpcoming 每次重绘都会调进来，不判重会把
+    // 正在跑的过渡反复重启（098 的余额滚动踩过同一个坑）。
+    if (idx === thrIdx) return;
+    var dir = thrIdx < 0 ? 0 : (idx > thrIdx ? 1 : -1);
+    thrIdx = idx;
+    for (i = 0; i < opts.length; i++) {
+      opts[i].setAttribute("aria-checked", i === idx ? "true" : "false");
+      opts[i].tabIndex = i === idx ? 0 : -1;
+    }
+    // 先挂方向 class 再改 --i：首帧没有 class 也就没有 transition，直接就位、不滑。
+    if (dir) {
+      box.classList.remove("go-r", "go-l");
+      box.classList.add(dir > 0 ? "go-r" : "go-l");
+    }
+    box.style.setProperty("--i", String(idx));
+  }
+
   function renderUpcoming() {
     var u = upcoming(), box = $("#upcoming");
-    $("#thr").value = String(doc.settings.threshold);
+    setThr(doc.settings.threshold);
     if (!u.length) {
       box.innerHTML = '<div class="none-yet">未来 ' + doc.settings.threshold + ' 天内无积分到期'
         + (doc.batches.length ? "" : "，点日历里的任意一天可以补录") + "</div>";
@@ -1514,14 +1546,39 @@
     var d = new Date(view[0], view[1] + n, 1);
     view = [d.getFullYear(), d.getMonth()]; persist(); renderCal();
   }
-  $("#thr").onchange = function () {
-    // 钳制：下拉取到空值/非法值时 +this.value 是 NaN，落库后「即将到期」会永久空白
-    // 且不给任何提示——用户只会以为"最近没有要过期的"，其实是阈值坏了。
-    var v = parseInt(this.value, 10);
-    if (!isFinite(v)) v = 3;
+  /* 047 · 阈值切换。钳制照旧：阈值一旦落成 NaN，「即将到期」会永久空白且不给
+   * 任何提示，用户只会以为"最近没有要过期的"，其实是阈值坏了。 */
+  function applyThr(v) {
+    if (!isFinite(v)) v = 3;                          // NaN 落库会让列表永久空白
     v = Math.min(365, Math.max(1, v));
+    setThr(v);                                        // 先滑，动画从这一刻开始
     commit(function (f) { f.settings.threshold = v; });
     renderUpcoming();
+  }
+
+  $("#thr").onclick = function (e) {
+    var t = e.target && e.target.closest ? e.target.closest(".so") : null;
+    if (!t) return;
+    var v = parseInt(t.getAttribute("data-v"), 10);
+    if (isFinite(v)) applyThr(v);
+  };
+
+  $("#thr").onkeydown = function (e) {
+    var k = e.key;
+    var d = k === "ArrowRight" || k === "ArrowDown" ? 1
+      : k === "ArrowLeft" || k === "ArrowUp" ? -1 : 0;
+    if (!d) return;
+    var box = $("#thr");
+    if (!box || !box.querySelectorAll) return;
+    var opts = [].slice.call(box.querySelectorAll(".so"));
+    if (!opts.length) return;
+    e.preventDefault();
+    var at = thrIdx < 0 ? 0 : thrIdx;
+    var nxt = opts[(at + d + opts.length) % opts.length];
+    var v = parseInt(nxt.getAttribute("data-v"), 10);
+    if (!isFinite(v)) return;
+    applyThr(v);
+    if (nxt.focus) nxt.focus();
   };
 
   /* ---------- 同步 ---------- */
