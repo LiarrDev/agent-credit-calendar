@@ -1,9 +1,15 @@
-# Agent 积分过期日历 — 扩展（v1.0.1）
+# Agent 积分过期日历 — 扩展（v1.0.2）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v1.0.1，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v1.0.2，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v1.0.2 是无障碍修复与现代化：授权弹窗从 `div.modal` 换成原生 `<dialog>`（焦点圈定、Esc/返回手势、
+背景 inert、焦点归还都交给浏览器），点遮罩关闭用 `closedby="any"` 并带特性检测兜底，`:modal` 与
+`::backdrop` 加滚动约束；日历格与批次行补上 Enter/Space，平台名、冲突徽标、两种「已…」区块、
+「关闭 ✕」换成真实按钮；`#toast` 加 `role="status" aria-live="polite"`；后台超时改
+`AbortSignal.timeout()`、浅拷贝排序改 `toSorted()`。数据结构与取数口径不变，升级不需要迁移数据。
 
 v1.0.1 只动视觉层：`calendar.css` 全量重写（282 → 525 行），`calendar.js` 一行未改，
 全部 id 与 class 钩子原样保留，**取数口径、存储结构与视觉之外的行为都没有变化**，

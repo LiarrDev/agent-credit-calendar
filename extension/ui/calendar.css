@@ -168,6 +168,7 @@ button.mini:hover{color:var(--ink)}
 .agent-name{
   font-weight:620;font-size:var(--t-title);cursor:pointer;display:inline-flex;align-items:center;gap:3px;
   letter-spacing:-.1px;transition:color var(--d-fast) var(--e-out);
+  border:0;background:none;padding:0;border-radius:0;color:inherit;font-family:inherit;text-align:left;
 }
 .agent-name:hover{color:var(--action-ink);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1.5px}
 .agent-name .ext{font-size:var(--t-xs);line-height:1;color:var(--ink-3);font-weight:500}
@@ -240,7 +241,8 @@ button.mini:hover{color:var(--ink)}
 .wasted{
   margin-top:var(--s3);font-size:var(--t-xs);color:var(--ink-3);
   display:flex;align-items:center;gap:5px;cursor:pointer;
-  border-top:1px dashed var(--line);padding-top:var(--s2);
+  width:100%;border:0;border-top:1px dashed var(--line);border-radius:0;
+  background:none;padding:var(--s2) 0 0;font-family:inherit;text-align:left;
   transition:color var(--d-fast) var(--e-out);
 }
 .wasted:hover{color:var(--warn)}
@@ -332,6 +334,7 @@ button.mini:hover{color:var(--ink)}
   display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
 .sec-h h3{margin:0;font-size:var(--t-title);font-weight:620;letter-spacing:-.1px}
 .sec-h .cnt{font-size:var(--t-xs);color:var(--ink-3);font-variant-numeric:tabular-nums}
+button.cnt{background:none;border:0;border-radius:0;padding:0;font:inherit;cursor:pointer}
 .sec-b{padding:var(--s2) var(--s2) var(--s3)}
 
 .row{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s2);border-radius:var(--r-sm);
@@ -416,13 +419,16 @@ footer b{color:var(--ink-2);font-weight:600}
 /* ============================================================
    10. 授权与捕获样本（扩展特有）
    ============================================================ */
-.modal{position:fixed;inset:0;background:rgba(16,20,28,.5);display:none;
-  align-items:flex-start;justify-content:center;z-index:50;padding:40px var(--s4);
-  backdrop-filter:blur(2px)}
-.modal.on{display:flex}
-.box{background:var(--panel);border-radius:var(--r-lg);max-width:660px;width:100%;
-  box-shadow:var(--sh-float);max-height:calc(100vh - 80px);display:flex;flex-direction:column;
-  border:1px solid var(--line)}
+/* 原生 dialog：焦点圈定、Esc/返回手势、背景 inert、焦点归还都由浏览器负责 */
+dialog.box{background:var(--panel);border-radius:var(--r-lg);
+  width:calc(100% - 32px);max-width:660px;box-shadow:var(--sh-float);
+  max-height:calc(100vh - 80px);padding:0;border:1px solid var(--line);
+  color:var(--ink);font:inherit}
+/* display 必须只给 [open]，否则会盖掉 UA 的关闭态 display:none */
+dialog.box[open]{display:flex;flex-direction:column}
+dialog.box:modal{overscroll-behavior:contain}
+dialog.box::backdrop{background:rgba(16,20,28,.5);backdrop-filter:blur(2px);
+  overflow:hidden;overscroll-behavior:contain}
 .box > h2{margin:0;padding:var(--s4) var(--s5);font-size:var(--t-h2);font-weight:640;
   letter-spacing:-.2px;border-bottom:1px solid var(--line-2)}
 .box .body{padding:var(--s4) var(--s5);overflow:auto}

@@ -29,7 +29,7 @@ function createDom() {
   function El(sel) {
     var html = "";
     return {
-      _sel: sel, _writes: 0, textContent: "", value: "", disabled: false, files: null,
+      _sel: sel, _writes: 0, textContent: "", value: "", disabled: false, files: null, open: false,
       get innerHTML() { return html; },
       set innerHTML(value) { html = value; this._writes++; },
       classList: { add: function () {}, remove: function () {}, contains: function () { return false; } },
@@ -38,6 +38,8 @@ function createDom() {
       removeEventListener: function () {},
       closest: function () { return null; },
       click: function () {},
+      showModal: function () { this.open = true; },
+      close: function () { this.open = false; if (this.onclose) this.onclose(); },
       appendChild: function () {}, remove: function () {},
       getAttribute: function () { return null; }, setAttribute: function () {}
     };
@@ -539,7 +541,7 @@ booted(ui).then(function (ext) {
     date.value = "2026-10-24"; ext.el("#detail").oninput({ target: date });
     ext.setNow("2026-10-24T00:00:00"); ext.tick();
     ok("跨午夜重新计算 TODAY 并剔除日期-only 旧批次", JSON.stringify(rowIds(ext.el("#upcoming").innerHTML)) === '["timer-tomorrow"]');
-    ok("跨午夜更新日历今天标记", /data-day="2026-10-24"><div class="dnum"><span class="td">今天/.test(ext.el("#grid").innerHTML));
+    ok("跨午夜更新日历今天标记", /data-day="2026-10-24"[^>]*><div class="dnum"><span class="td">今天/.test(ext.el("#grid").innerHTML));
     ok("跨午夜仍以草稿日期显示到期状态，不恢复旧时间", ext.el("#editExpiryStatus").innerHTML.includes("今天到期")
       && ext.el("#editExpiryMeta").innerHTML === "" && ext.el("#detail")._writes === detailWrites);
 

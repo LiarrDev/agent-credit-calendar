@@ -63,19 +63,17 @@
 </div>
 
 <!-- 授权与样本 -->
-<div class="modal" id="mAuth">
-  <div class="box">
-    <h2>授权与捕获样本</h2>
-    <div class="body" id="authBody"></div>
-    <div class="foot">
-      <button id="expCap" title="导出内容含平台响应体，可能带账号标识；分享前请先脱敏">导出捕获样本</button>
-      <button id="expDoc" title="导出内容包含捕获样本，可能带账号标识；不要上传到公开仓库">导出全部数据</button>
-      <button class="primary" id="closeAuth">完成</button>
-    </div>
+<dialog class="box" id="mAuth" aria-labelledby="authTitle" closedby="any">
+  <h2 id="authTitle">授权与捕获样本</h2>
+  <div class="body" id="authBody"></div>
+  <div class="foot">
+    <button id="expCap" title="导出内容含平台响应体，可能带账号标识；分享前请先脱敏">导出捕获样本</button>
+    <button id="expDoc" title="导出内容包含捕获样本，可能带账号标识；不要上传到公开仓库">导出全部数据</button>
+    <button class="primary" id="closeAuth" autofocus>完成</button>
   </div>
-</div>
+</dialog>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="../lib/agents.js"></script>
 <script src="../lib/normalize.js"></script>

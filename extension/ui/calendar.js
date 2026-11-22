@@ -16,6 +16,9 @@
 
   var doc = null;
   var view, sel, edit, wasted, delConfirm, authOpen = false, authView = null;
+  // 键盘选日期后整个 #grid 会重画，焦点随旧节点一起消失；记住要还焦点的格子。
+  var focusDay = null;
+  var authDlg = $("#mAuth");
   /* 「正在填补录表单」的标记。语义与 edit 并列，但必须单独一个：
    * renderAdd 不写 edit（补录的是还没有 batchId 的新批次），于是后台任何一次写入
    * 触发的 onChanged 重画都会把表单连同已输入的内容冲掉 —— 而 service worker
@@ -191,7 +194,7 @@
     act.forEach(function (b) {
       if (!soonest || compareExpiry(b, soonest) < 0) soonest = b;
     });
-    var newest = all.slice().sort(function (a, c) { return a.capturedAt < c.capturedAt ? 1 : -1; })[0];
+    var newest = all.toSorted(function (a, c) { return a.capturedAt < c.capturedAt ? 1 : -1; })[0];
     var cfg = doc.agents[agent] || {};
     return {
       agent: agent, name: cfg.name || agent, unit: cfg.unit || "credits",
@@ -379,8 +382,8 @@
       var k = d <= 2 ? "hot" : d <= 7 ? "warm" : "cool";
       cd = '<span class="cd ' + k + '">' + (d === 0 ? "今天到期" : "还有 " + d + " 天") + "</span>";
     }
-    return '<div class="card-head"><span class="agent-name" data-act="console" data-agent="' + s.agent + '" title="打开 ' + esc(s.name) + ' 后台">'
-      + esc(s.name) + '<span class="ext" aria-hidden="true">↗</span></span>'
+    return '<div class="card-head"><button type="button" class="agent-name" data-act="console" data-agent="' + s.agent + '" title="打开 ' + esc(s.name) + ' 后台">'
+      + esc(s.name) + '<span class="ext" aria-hidden="true">↗</span></button>'
       + '<span class="card-acts">'
       + (IS_EXT
         ? '<button type="button" class="card-refresh" data-act="refresh" data-id="' + s.agent
@@ -397,20 +400,20 @@
       + '<div class="tstamp">' + (s.count
           ? s.count + " 个批次 · " + timeText(s)
           : '0 个批次 · <span class="mn">还没有数据</span>')
-      + (s.conflicts ? ' <span class="badge" data-act="conflicts" data-agent="' + s.agent + '">'
-          + s.conflicts + " 笔待裁决</span>" : "") + "</div>"
+      + (s.conflicts ? ' <button type="button" class="badge" data-act="conflicts" data-agent="' + s.agent + '">'
+          + s.conflicts + " 笔待裁决</button>" : "") + "</div>"
       + (s.wastedCount
-        ? '<div class="wasted" data-act="wasted" data-agent="' + s.agent + '">'
+        ? '<button type="button" class="wasted" data-act="wasted" data-agent="' + s.agent + '">'
           + "已过期未用完 <b>" + fmt(s.unit, s.wasted) + unitTail(s.unit) + "</b>（" + s.wastedCount + " 笔）"
-          + '<span class="ar">查看 ›</span></div>'
+          + '<span class="ar">查看 ›</span></button>'
         : "")
       // 第三种状态必须自己占一行：不是余额、也不是"过期作废"。
       // 不写出来的话，用户只会看到"刷新了但余额没变"，然后去后台发现对不上。
       + (s.goneCount
-        ? '<div class="wasted" data-act="closed" data-agent="' + s.agent + '">'
+        ? '<button type="button" class="wasted" data-act="closed" data-agent="' + s.agent + '">'
           + "已不在后台返回 <b>" + fmt(s.unit, s.goneSum) + unitTail(s.unit) + "</b>（"
           + s.goneCount + " 笔 · 已从余额剔除）"
-          + '<span class="ar">查看 ›</span></div>'
+          + '<span class="ar">查看 ›</span></button>'
         : "")
       + "";
   }
@@ -555,7 +558,8 @@
       });
       groups.sort(function (a, c) { return c.remaining - a.remaining; });
       var shown = groups.slice(0, 4);
-      var html = '<div class="' + cls + '" data-day="' + ds + '"><div class="dnum">'
+      var html = '<div class="' + cls + '" data-day="' + ds + '"'
+        + (out ? "" : ' role="button" tabindex="0"') + '><div class="dnum">'
         + (d.getTime() === todayTs ? '<span class="td">今天</span>' : "")
         + '<span style="' + (d.getDate() === 1 ? "font-weight:650;color:var(--ink)" : "") + '">'
         + d.getDate() + "</span></div>";
@@ -571,6 +575,13 @@
       }
       return html + "</div>";
     }).join("");
+
+    if (focusDay) {
+      var want = focusDay, grid = $("#grid");
+      focusDay = null;
+      var target = grid.querySelector ? grid.querySelector('[data-day="' + want + '"]') : null;
+      if (target && target.focus) target.focus();
+    }
   }
 
   function renderLegend() {
@@ -625,7 +636,7 @@
     box.innerHTML = u.map(function (b) {
       var d = N.daysLeft(b.expiresAt, TODAY);
       var k = d <= 2 ? "#b91c1c" : d <= 7 ? "#9a3412" : "var(--ink-2)";
-      return '<div class="row" data-bid="' + b.batchId + '" style="--c:' + colorOf(b.agent) + '">'
+      return '<div class="row" role="button" tabindex="0" data-bid="' + b.batchId + '" style="--c:' + colorOf(b.agent) + '">'
         + '<span class="bar"></span><div class="info"><div class="l1">'
         + esc((doc.agents[b.agent] || {}).name || b.agent)
         + ' <span style="font-weight:450;color:var(--ink-2)">· ' + esc(shortLbl(b.label)) + "</span></div>"
@@ -653,7 +664,7 @@
         + '<span class="cnt">' + (d < 0 ? "已过去" : d === 0 ? "今天" : "还有 " + d + " 天") + "</span></div>"
         + (items.length
           ? '<div class="sec-b">' + items.map(function (b) {
-              return '<div class="row" data-bid="' + b.batchId + '" style="--c:' + colorOf(b.agent) + '">'
+              return '<div class="row" role="button" tabindex="0" data-bid="' + b.batchId + '" style="--c:' + colorOf(b.agent) + '">'
                 + '<span class="bar"></span><div class="info"><div class="l1">'
                 + esc((doc.agents[b.agent] || {}).name || b.agent) + "</div>"
                 + '<div class="l2">' + esc(b.label) + "</div>"
@@ -682,13 +693,13 @@
     var sum = 0; exp.forEach(function (b) { sum += b.remaining; });
     var unit = (doc.agents[agent] || {}).unit || "credits";
     box.innerHTML = '<div class="sec-h"><h3>已过期未用完</h3>'
-      + '<span class="cnt" style="color:var(--ink-3);cursor:pointer" data-act="close">关闭 ✕</span></div>'
+      + '<button type="button" class="cnt" data-act="close">关闭 ✕</button></div>'
       + '<div class="sec-b" style="--c:' + colorOf(agent) + '">'
       + '<div style="padding:8px 8px 4px;font-size:12.5px;color:var(--ink-2)">'
       + esc((doc.agents[agent] || {}).name || agent) + " · 共 <b style=\"color:var(--warn)\">"
       + fmt(unit, sum) + unitTail(unit) + "</b> 在到期时没用掉</div>"
       + exp.map(function (b) {
-          return '<div class="row" data-bid="' + b.batchId + '"><span class="bar"></span><div class="info">'
+          return '<div class="row" role="button" tabindex="0" data-bid="' + b.batchId + '"><span class="bar"></span><div class="info">'
             + '<div class="l1">' + esc(shortLbl(b.label)) + "</div>"
             + '<div class="l2">' + esc(N.formatExpiry(b)) + " 到期 · " + expiryStatus(b) + "</div></div>"
             + '<div class="amt" style="color:var(--warn)">' + fmt(b.unit, b.remaining)
@@ -717,13 +728,13 @@
     var sum = 0; gone.forEach(function (b) { sum += b.remaining; });
     var unit = (doc.agents[agent] || {}).unit || "credits";
     box.innerHTML = '<div class="sec-h"><h3>已不在后台返回</h3>'
-      + '<span class="cnt" style="color:var(--ink-3);cursor:pointer" data-act="close">关闭 ✕</span></div>'
+      + '<button type="button" class="cnt" data-act="close">关闭 ✕</button></div>'
       + '<div class="sec-b" style="--c:' + colorOf(agent) + '">'
       + '<div style="padding:8px 8px 4px;font-size:12.5px;color:var(--ink-2)">'
       + esc((doc.agents[agent] || {}).name || agent) + " · 共 <b>" + fmt(unit, sum) + unitTail(unit)
       + "</b> 已经不在这家平台的额度列表里，<b>不计入余额</b></div>"
       + gone.map(function (b) {
-          return '<div class="row" data-bid="' + b.batchId + '"><span class="bar"></span><div class="info">'
+          return '<div class="row" role="button" tabindex="0" data-bid="' + b.batchId + '"><span class="bar"></span><div class="info">'
             + '<div class="l1">' + esc(shortLbl(b.label)) + "</div>"
             + '<div class="l2">' + b.expiresAt + " 到期 · "
             + (b.closedAt ? ago(b.closedAt) + "起没再返回" : "最近 " + (b.absentCount || 0) + " 次没返回") + "</div></div>"
@@ -769,7 +780,7 @@
         + '<button class="mini" data-act="accept">采用抓取值</button></div>'
       : "";
     box.innerHTML = '<div class="sec-h"><h3>修正批次</h3>'
-      + '<span class="cnt" style="color:var(--ink-3);cursor:pointer" data-act="close">关闭 ✕</span></div>'
+      + '<button type="button" class="cnt" data-act="close">关闭 ✕</button></div>'
       + '<div class="dt" style="--c:' + colorOf(b.agent) + '">'
       + conflict
       + '<div class="ttl">' + esc((doc.agents[b.agent] || {}).name || b.agent)
@@ -805,7 +816,7 @@
     var box = $("#detail");
     var defDay = sel || N.ymd(N.addDays(TODAY, 30));
     box.innerHTML = '<div class="sec-h"><h3>补录批次</h3>'
-      + '<span class="cnt" style="color:var(--ink-3);cursor:pointer" data-act="close">关闭 ✕</span></div>'
+      + '<button type="button" class="cnt" data-act="close">关闭 ✕</button></div>'
       + '<div class="dt"><div class="ttl">新批次<span class="manual-flag">手动</span></div>'
       + '<div class="lbl">抓不到的平台就走这条路，UI 上会如实标成手动录入。</div>'
       + '<div class="fld"><label>Agent</label><select data-nf="agent">'
@@ -877,8 +888,8 @@
 
   function renderAuth() {
     var box = $("#authBody");
-    if (!authOpen) { $("#mAuth").classList.remove("on"); return; }
-    $("#mAuth").classList.add("on");
+    if (!authOpen) { if (authDlg.open) authDlg.close(); return; }
+    if (!authDlg.open) authDlg.showModal();
 
     if (authView === "__diag__") return renderDiag(box);
     if (authView && authView.indexOf("__paste__:") === 0) return renderPaste(box, authView.slice("__paste__:".length));
@@ -1432,11 +1443,30 @@
     persist(); render();
   });
 
+  $("#grid").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    var cell = e.target.closest(".cell");
+    if (!cell || cell.classList.contains("out")) return;
+    e.preventDefault();
+    focusDay = cell.getAttribute("data-day");
+    cell.click();
+  });
+
   $("#upcoming").addEventListener("click", function (e) {
     var r = e.target.closest("[data-bid]"); if (!r) return;
     edit = r.getAttribute("data-bid"); adding = false; sel = null; wasted = null; delConfirm = null;
     persist(); render();
   });
+
+  function activateRowOnKey(e) {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    var row = e.target.closest("[data-bid]");
+    if (!row) return;
+    e.preventDefault();
+    row.click();
+  }
+  $("#upcoming").addEventListener("keydown", activateRowOnKey);
+  $("#detail").addEventListener("keydown", activateRowOnKey);
 
   $("#detail").addEventListener("input", function (e) {
     if (edit && e.target.getAttribute("data-f") === "expiresAt") refreshEditExpiry();
@@ -1741,12 +1771,27 @@
 
   /* ---------- 授权面板 ---------- */
 
+  // 浏览器自己关闭（Esc、返回手势、closedby 点遮罩）时，把内部状态同步回来
+  authDlg.addEventListener("close", function () {
+    authOpen = false; authView = null; render();
+  });
+  // closedby 兜底：不支持的浏览器里自己判断"按下与抬起都落在遮罩上"
+  if (typeof HTMLDialogElement === "undefined" || !("closedBy" in HTMLDialogElement.prototype)) {
+    var pressedOutside = false, outsideDialog = function (e) {
+      var r = authDlg.getBoundingClientRect();
+      return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    };
+    authDlg.addEventListener("pointerdown", function (e) { pressedOutside = outsideDialog(e); });
+    authDlg.addEventListener("pointerup", function (e) {
+      if (pressedOutside && outsideDialog(e)) authDlg.close();
+    });
+  }
+
   $("#btnAuth").onclick = function () {
     authOpen = true; authView = null; adding = false; renderAuth();
     if (!IS_EXT) toast("预览模式：可以填地址，但授权与抓取需要装成扩展");
   };
-  $("#closeAuth").onclick = function () { authOpen = false; authView = null; $("#mAuth").classList.remove("on"); render(); };
-  $("#mAuth").addEventListener("click", function (e) { if (e.target === this) $("#closeAuth").click(); });
+  $("#closeAuth").onclick = function () { authDlg.close(); };
 
   $("#authBody").addEventListener("click", function (e) {
     var t = e.target.closest("[data-act]"); if (!t) return;

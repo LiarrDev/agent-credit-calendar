@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v1.0.1**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）；v1.0.0 起取数口径与存储结构冻结，1.x 只做兼容性修复与体验打磨（决策 38）。
+> 状态：`extension/` **v1.0.2**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）；v1.0.0 起取数口径与存储结构冻结，1.x 只做兼容性修复与体验打磨（决策 38）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -32,6 +32,7 @@
 > v0.3.39 「即将到期」的阈值从原生 `<select>` 换成会滑的分段控件，位置全靠 `calc()` 算、不做 JS 测量（决策 37）。
 > v1.0.0 版本号从 `0.3.39` 收束到 `1.0.0`，功能无变化；**`CreditBatch` 与 `dedupKey` 就此冻结**，1.x 不再动文档结构与 adapter 契约（决策 38）。
 > v1.0.1 只动视觉层：`calendar.css` 全量重写、`calendar.js` 零改动、钩子全保留；修掉事件条「金额被省略号吃掉」与四个布局缺陷（决策 39）。
+> v1.0.2 修无障碍与现代化：授权弹窗迁移到原生 `<dialog>`、点击控件补键盘通路、toast 加 live region；取数口径与存储结构不变（决策 40）。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
@@ -806,6 +807,22 @@ free-packages 响应有 **约 130KB**，而 `sanitizeCapture` 的默认上限仍
     - **验证**：本机没有 Chrome/Edge，taste-skill 自带的 check/shoot 在 Opera 下会挂起，
       改用 Opera 131 + CDP 手写截图与量几何，跑了 1440/1280/1100/1024/900/390/320 七个宽度。
       测试 873 条全绿，一行没改。
+
+40. **（v1.0.2）无障碍与现代化：弹窗交给原生 `<dialog>`，点击控件必须键盘可达。**
+    用 GoogleChrome/modern-web-guidance 的 `legacy-scan`（38 个 guide / 52 条确定性规则）扫出 2 条，
+    再按 `dialog`、`accessibility`、`js` 指南人工核对；`sanitize-untrusted-html` 与 `dark-mode` 不适用。
+    - **弹窗**：`div.modal` + `.on` 换成 `<dialog class="box" closedby="any" aria-labelledby>` + `showModal()`；
+      Esc/返回手势/焦点圈定/背景 inert/焦点归还都由浏览器负责，不再手写 focus trap；点遮罩关闭由
+      `closedby` 承担，并用 `closedBy` 特性检测兜底（按下与抬起都落在遮罩外才关）；`:modal` 与
+      `::backdrop` 加 `overscroll-behavior` / `overflow` 约束，背景不再跟着滚。
+    - **键盘**：日历格与「即将到期 / 当日明细 / 已过期 / 已消失」行加 `role="button"` + `tabindex`
+      + Enter/Space；平台名、冲突徽标、两种「已…」区块、「关闭 ✕」换成真实 `<button>`，样式重置
+      集中在 `.agent-name` / `.wasted` / `button.cnt`，外观不变。
+    - **播报**：`#toast` 加 `role="status" aria-live="polite"`，同步结果与导入错误读屏能收到。
+    - **现代化**：后台超时 `AbortController + setTimeout` → `AbortSignal.timeout(15000)`；
+      `slice().sort()` → `toSorted()`；重跑 `legacy-scan` 归零。
+    - **验证**：873 条断言全绿（DOM 桩补 `showModal/close`，一条结构断言放宽到允许新增属性）；
+      浏览器实测弹窗 `:modal`、Esc 关闭并归还焦点、背景滚动约束、日历格与批次行 Enter 生效。
 
 ## 8. 需要你提供 / 待确认
 

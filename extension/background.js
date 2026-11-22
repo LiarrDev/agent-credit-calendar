@@ -1532,22 +1532,15 @@ async function directFetchInPage(cfg) {
     // 请求体由后台按 adapter 的 buildBody 构造好再传进来（这里不做业务判断）。
     var payload = cfg.body ? JSON.stringify(cfg.body) : undefined;
 
-    var ctl = new AbortController();
-    var timer = setTimeout(function () { ctl.abort(); }, 15000);
-    var res, text;
-    try {
-      res = await fetch(cfg.url, {
-        method: cfg.method || "GET",
-        credentials: "include",
-        headers: headers,
-        body: payload,
-        cache: "no-store",
-        signal: ctl.signal
-      });
-      text = await res.text();
-    } finally {
-      clearTimeout(timer);
-    }
+    var res = await fetch(cfg.url, {
+      method: cfg.method || "GET",
+      credentials: "include",
+      headers: headers,
+      body: payload,
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000)
+    });
+    var text = await res.text();
 
     // 「多大」要按字节报：中文一个字 3 字节，用字符串长度当字节数报出去，
     // 面板上的数字会比响应实际小一截，和别的数字对不上时很难解释。
