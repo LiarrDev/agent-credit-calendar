@@ -32,3 +32,7 @@ credit-calendar-*.json
 
 # WorkBuddy 本地数据（skill / memory），不入库
 .workbuddy/
+
+# 本地安装的 Qoder skill（不入库，各人自行安装）
+.qoder/
+skills-lock.json
