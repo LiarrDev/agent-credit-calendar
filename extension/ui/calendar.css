@@ -31,11 +31,15 @@
 
   /* 强调色只有一支：填充用 --action，文字与描边用 --action-ink（6.7:1） */
   --action:#2f6bff; --action-ink:#1c4ed8; --action-hover:#2050d8; --action-wash:#eef3ff;
+  /* 承载白字（主按钮）的填充色比 --action 再深一档，保证 13px 白字过 4.5:1 */
+  --action-fill:#2563eb;
   --action-line:#c7d2fe; --action-strong:#1f4fc4; --on-accent:#fff;
   --sync-a:#3f7bff; --sync-b:#6fa4ff; --sheen:rgba(255,255,255,.3);
 
   /* 语义色：成功 / 信息 / 警告 / 危险各一组，底色和字色分开取 */
   --warn:#b4460b; --ok:#0f9d76;
+  /* 成功态实心填充：亮色加深一档保证白字过 AA；暗色用浅绿配深字 */
+  --ok-fill:#0b7a5e; --on-ok:#fff;
   --ok-ink:#047857; --ok-bg:#ecfdf5; --ok-line:#bbf7d0;
   --info-bg:#eff6ff; --info-line:#bfdbfe;
   --warn-bg:#fff7ed; --warn-line:#fed7aa; --warn-mid-bg:#ffedd5;
@@ -104,11 +108,13 @@
     --grid-line:rgba(233,237,243,.10);
 
     --action:#2f63e6; --action-ink:#9db9ff; --action-hover:#2a5ad4;
+    --action-fill:#2f63e6;
     --action-wash:rgba(63,116,240,.16);
     --action-line:rgba(157,185,255,.35); --action-strong:#244fbf; --on-accent:#fff;
     --sync-a:#3f74f0; --sync-b:#6f9bff; --sheen:rgba(255,255,255,.28);
 
     --warn:#f0a26a; --ok:#3ecfa2;
+    --ok-fill:#3ecfa2; --on-ok:#12151a;
     --ok-ink:#4bd6a8; --ok-bg:rgba(75,214,168,.12); --ok-line:rgba(75,214,168,.35);
     --info-bg:rgba(91,140,255,.14); --info-line:rgba(157,185,255,.32);
     --warn-bg:rgba(240,162,106,.12); --warn-line:rgba(240,162,106,.35);
@@ -181,11 +187,13 @@ button{
 }
 button:hover{background:var(--panel-2);border-color:var(--line-strong)}
 button:active{transform:translateY(1px)}
-button.primary{background:var(--action);border-color:var(--action);color:var(--on-accent);font-weight:560}
+button.primary{background:var(--action-fill);border-color:var(--action-fill);color:var(--on-accent);font-weight:560}
 button.primary:hover{background:var(--action-hover);border-color:var(--action-hover)}
 button.primary:disabled{opacity:.55;cursor:default;transform:none}
 button.mini{padding:4px 9px;font-size:var(--t-xs);border-radius:var(--r-sm);color:var(--ink-2)}
 button.mini:hover{color:var(--ink)}
+/* 小号主按钮：.mini 的次级文字色不能盖掉主按钮的白字 */
+button.mini.primary,button.mini.primary:hover{color:var(--on-accent)}
 
 /* 顶栏两个纯图标按钮：圆形化，和文字按钮区分开 */
 .gh-link{
@@ -222,10 +230,11 @@ button.mini:hover{color:var(--ink)}
   stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 #sync[data-st="run"]{background:var(--action-strong);border-color:var(--action-strong);color:var(--on-accent);opacity:1;cursor:default}
 #sync[data-st="run"]:hover{background:var(--action-strong);border-color:var(--action-strong)}
-#sync[data-st="fold"],#sync[data-st="done"],#sync[data-st="fail"]{color:var(--on-accent);opacity:1}
+#sync[data-st="fold"],#sync[data-st="done"]{color:var(--on-ok);opacity:1}
+#sync[data-st="fail"]{color:var(--on-accent);opacity:1}
 #sync[data-st="fold"] .bar,#sync[data-st="done"] .bar,#sync[data-st="fail"] .bar{opacity:0}
-#sync[data-st="fold"]{background:var(--ok);border-color:var(--ok);padding:7px 11px}
-#sync[data-st="done"]{background:var(--ok);border-color:var(--ok)}
+#sync[data-st="fold"]{background:var(--ok-fill);border-color:var(--ok-fill);padding:7px 11px}
+#sync[data-st="done"]{background:var(--ok-fill);border-color:var(--ok-fill)}
 #sync[data-st="done"] .ck{margin-right:5px}
 #sync[data-st="fail"]{background:var(--danger-fill);border-color:var(--danger-fill)}
 #sync[data-st="fold"] .lb{display:none}
@@ -383,7 +392,7 @@ button.mini:hover{color:var(--ink)}
 .dnum{font-size:var(--t-xs);color:var(--ink-2);font-weight:540;display:flex;align-items:center;gap:5px;
   font-variant-numeric:tabular-nums;line-height:1.4}
 .cell.past .dnum{color:var(--ink-past)}
-.dnum .td{background:var(--action);color:var(--on-accent);border-radius:5px;padding:0 5px;
+.dnum .td{background:var(--action-fill);color:var(--on-accent);border-radius:5px;padding:0 5px;
   font-size:var(--t-xs);line-height:17px;font-weight:600}
 
 .entries{margin-top:5px;display:flex;flex-direction:column;gap:4px}

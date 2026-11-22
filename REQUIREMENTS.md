@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v1.1.0**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）；v1.0.0 起取数口径与存储结构冻结，1.x 只做兼容性修复与体验打磨（决策 38）。
+> 状态：`extension/` **v1.1.1**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）；v1.0.0 起取数口径与存储结构冻结，1.x 只做兼容性修复与体验打磨（决策 38）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -34,6 +34,7 @@
 > v1.0.1 只动视觉层：`calendar.css` 全量重写、`calendar.js` 零改动、钩子全保留；修掉事件条「金额被省略号吃掉」与四个布局缺陷（决策 39）。
 > v1.0.2 修无障碍与现代化：授权弹窗迁移到原生 `<dialog>`、点击控件补键盘通路、toast 加 live region；取数口径与存储结构不变（决策 40）。
 > v1.1.0 加深色模式：跟随系统 `prefers-color-scheme`，CSS 颜色全部 token 化，暗色只覆盖 token（决策 41）。
+> v1.1.1 修对比度：授权面板 mini primary 按钮文字色被 .mini 覆盖、同步完成态绿底白字；均过 AA（决策 42）。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
@@ -839,6 +840,18 @@ free-packages 响应有 **约 130KB**，而 `sanitizeCapture` 的默认上限仍
     - **验证**：873 条断言全绿；Opera headless + CDP 分别以亮色 1440×900、暗色 1440×900、
       暗色 390×844 渲染检查，弹窗、表单、状态 chip、分段控件在两种主题下可用，
       亮色与 v1.0.2 视觉一致。
+
+42. **（v1.1.1）按钮对比度：主按钮白字不能被次级样式覆盖，完成态按主题配色。**
+    两个问题都是「颜色写在组件里、没有靠 token 约束」的后遗症。
+    - **mini primary**：`button.mini` 与 `button.primary` 权重相同且写在后面，把主按钮的
+      白字覆盖成 `--ink-2`（亮色 1.70:1、暗色 2.82:1）。补 `button.mini.primary` 显式取
+      `--on-accent`（含 hover）；主按钮填充新增 `--action-fill`（亮 `#2563eb` / 暗 `#2f63e6`），
+      13px 白字实测 5.17 / 5.19:1。
+    - **同步完成态**：`#sync[data-st=fold|done]` 原用白字配 `--ok`（亮 3.44:1、暗 1.97:1）。
+      改为 `--ok-fill` + `--on-ok`：亮色深绿底白字（5.30:1），暗色浅绿底深字（9.28:1）；
+      失败态白字红底实测 5.85 / 4.75:1，不动。
+    - **验证**：873 条断言全绿；Opera headless 在亮/暗下量了 done / fold / fail 与授权面板
+      按钮的计算色和截图，均过 AA。
 
 ## 8. 需要你提供 / 待确认
 
