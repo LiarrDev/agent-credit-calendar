@@ -1,9 +1,15 @@
-# Agent 积分过期日历 — 扩展（v1.0.2）
+# Agent 积分过期日历 — 扩展（v1.1.0）
 
 Chrome MV3 扩展（Opera 直接兼容）。在月历上标出每家 AI Agent 哪一天有积分到期，
 外加余额总览、批次明细和手动修正。需求与决策记录在仓库根的 `REQUIREMENTS.md`。
 
-**现在的状态：v1.0.2，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+**现在的状态：v1.1.0，Qoder 页面内直读 + LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入。**
+
+v1.1.0 加深色模式，跟随系统 `prefers-color-scheme`，不另做开关。声明
+`color-scheme: light dark` 后原生控件、滚动条与日期选择器一起变；CSS 里原先散落的十六进制色
+全部收成语义 token，暗色只在 `@media` 里覆盖 token 值、组件规则不动；事件条底色按
+「平台色 × 面板」混色，平台名在暗色下改为与白色混色。暗色正文对比度 14.8:1、次级 9.5:1、
+三级 6.7:1，状态色在各自淡染底上 7.3–9.5:1，均过 AA。数据结构与取数口径不变，升级不需要迁移。
 
 v1.0.2 是无障碍修复与现代化：授权弹窗从 `div.modal` 换成原生 `<dialog>`（焦点圈定、Esc/返回手势、
 背景 inert、焦点归还都交给浏览器），点遮罩关闭用 `closedby="any"` 并带特性检测兜底，`:modal` 与

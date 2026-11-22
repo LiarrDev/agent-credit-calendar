@@ -1,6 +1,6 @@
 # AI Agent 积分过期日历 · 需求规划（v3）
 
-> 状态：`extension/` **v1.0.2**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）；v1.0.0 起取数口径与存储结构冻结，1.x 只做兼容性修复与体验打磨（决策 38）。
+> 状态：`extension/` **v1.1.0**，Qoder 页面内直读、LobsterAI / TRAE 跨域截获、WorkBuddy 同源截获已接入（授权后自动收尾）；v1.0.0 起取数口径与存储结构冻结，1.x 只做兼容性修复与体验打磨（决策 38）。
 > v0.3.9 修掉 WorkBuddy 130KB 响应被 60KB 上限截断，并让旧截断样本在刷新时原位升级。
 > v0.3.10 是修 bug 的版本：收紧样本归属的信任边界（页面伪造 `agentId` 可污染别家批次）、样本详情不再全量渲染、`contentHash` 精度、冻结批次 `status`、刷新等待改事件驱动。详见 `CODE_REVIEW.md`。
 > v0.3.11 补回事件驱动的兜底复查（只靠 `storage.onChanged` 会在 SW 被回收时静默丢事件）。
@@ -33,6 +33,7 @@
 > v1.0.0 版本号从 `0.3.39` 收束到 `1.0.0`，功能无变化；**`CreditBatch` 与 `dedupKey` 就此冻结**，1.x 不再动文档结构与 adapter 契约（决策 38）。
 > v1.0.1 只动视觉层：`calendar.css` 全量重写、`calendar.js` 零改动、钩子全保留；修掉事件条「金额被省略号吃掉」与四个布局缺陷（决策 39）。
 > v1.0.2 修无障碍与现代化：授权弹窗迁移到原生 `<dialog>`、点击控件补键盘通路、toast 加 live region；取数口径与存储结构不变（决策 40）。
+> v1.1.0 加深色模式：跟随系统 `prefers-color-scheme`，CSS 颜色全部 token 化，暗色只覆盖 token（决策 41）。
 > 目标平台：Qoder、TRAE、WorkBuddy、LobsterAI
 > 形态：**Chrome MV3 浏览器扩展**（v1 的「本地单页网页 + Node/Playwright 抓取」方案已废弃，见 §7 决策记录）
 > 日常浏览器：Opera（Chromium 内核，按 Chrome 扩展装载）
@@ -823,6 +824,21 @@ free-packages 响应有 **约 130KB**，而 `sanitizeCapture` 的默认上限仍
       `slice().sort()` → `toSorted()`；重跑 `legacy-scan` 归零。
     - **验证**：873 条断言全绿（DOM 桩补 `showModal/close`，一条结构断言放宽到允许新增属性）；
       浏览器实测弹窗 `:modal`、Esc 关闭并归还焦点、背景滚动约束、日历格与批次行 Enter 生效。
+
+41. **（v1.1.0）深色模式跟随系统，不另做开关；颜色一律先收 token 再写组件。**
+    系统偏好就是默认值：`dark-mode` 指南明确「Most sites do not need a persistent toggle」，
+    所以只声明 `color-scheme: light dark` + `@media(prefers-color-scheme: dark)` 覆盖 token，
+    不写 JS 检测、不存主题偏好，也不引入 `light-dark()` 的兼容分支。
+    - **token 化**：原先散落在组件里的十六进制色（卡片、chip、状态、危险/警告、日历格、
+      行悬停、输入面、投影）全部收进 `:root` 语义 token；暗色只改 token 值，组件规则不动。
+      事件条底色混 `--mix-bg`、平台名混 `--mix-fg`，亮暗各取合适的混合基底。
+    - **原生 UI**：`<meta name="color-scheme">` + `:root{color-scheme:light dark}` 让滚动条、
+      日期选择器与输入控件自动切暗色，不用逐个重画。
+    - **对比度**：暗色正文 14.8:1、次级 9.5:1、三级 6.7:1；成功/警告/危险/信息色在各自
+      淡染底上 7.3–9.5:1；`--ink-past` 由 3.5:1 提到 4.6:1。
+    - **验证**：873 条断言全绿；Opera headless + CDP 分别以亮色 1440×900、暗色 1440×900、
+      暗色 390×844 渲染检查，弹窗、表单、状态 chip、分段控件在两种主题下可用，
+      亮色与 v1.0.2 视觉一致。
 
 ## 8. 需要你提供 / 待确认
 

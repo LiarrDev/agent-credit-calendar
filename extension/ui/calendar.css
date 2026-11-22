@@ -14,19 +14,51 @@
    1. tokens
    ============================================================ */
 :root{
+  /* 跟随系统亮/暗。声明 color-scheme 后原生控件、滚动条、日期选择器会一起变 */
+  color-scheme:light dark;
+
   /* 墨色：ink 17.8:1，ink-2 7.7:1，ink-3 5.6:1（白底实测），三档都过 AA */
   --ink:#15181e; --ink-2:#4b5462; --ink-3:#5f6875;
+  /* 装饰性灰：不承载正文信息，只做箭头、沉底日期这类弱提示 */
+  --ink-faint:#b7bfcc; --ink-past:#a8b0bc;
 
   /* 地面与描边：描边用墨色的透明度，换底色时不用再调三次 */
-  --bg:#f4f5f7; --panel:#fff; --panel-2:#fafbfc;
+  --bg:#f4f5f7; --panel:#fff; --panel-2:#fafbfc; --field:#f8fafc;
   --line:rgba(21,24,30,.12); --line-2:rgba(21,24,30,.07);
+  --line-strong:rgba(21,24,30,.2);
   /* 日历网格线比分区线略重：格子同色白底，太淡就散架 */
   --grid-line:rgba(21,24,30,.09);
 
   /* 强调色只有一支：填充用 --action，文字与描边用 --action-ink（6.7:1） */
   --action:#2f6bff; --action-ink:#1c4ed8; --action-hover:#2050d8; --action-wash:#eef3ff;
+  --action-line:#c7d2fe; --action-strong:#1f4fc4; --on-accent:#fff;
+  --sync-a:#3f7bff; --sync-b:#6fa4ff; --sheen:rgba(255,255,255,.3);
+
+  /* 语义色：成功 / 信息 / 警告 / 危险各一组，底色和字色分开取 */
   --warn:#b4460b; --ok:#0f9d76;
+  --ok-ink:#047857; --ok-bg:#ecfdf5; --ok-line:#bbf7d0;
+  --info-bg:#eff6ff; --info-line:#bfdbfe;
+  --warn-bg:#fff7ed; --warn-line:#fed7aa; --warn-mid-bg:#ffedd5;
+  --warn-soft-bg:#fffbeb; --warn-chip-bg:#fef3c7; --warn-chip-line:#fde68a;
+  --warn-ink:#b45309; --warn-ink-2:#92400e; --warn-ink-3:#9a3412;
   --danger:#b91c1c; --danger-fill:#c2261f;
+  --danger-ink:#b91c1c; --danger-bg:#fee2e2; --danger-soft-bg:#fef2f2;
+  --danger-line:#fecaca; --danger-line-strong:#fca5a5; --danger-hover:#a51f19;
+
+  /* 中性面：chip、状态底、格子弱化、行悬停、分段控件、输入面 */
+  --chip-bg:#f1f3f7;
+  --neutral-bg:#eef2f7; --neutral-2-bg:#f1f5f9;
+  --cell-hover:#f8fafe; --cell-out:#f8f9fb; --cell-weekend:#fafbfc; --cell-weekend-out:#f6f7f9;
+  --row-hover:#f6f8fb; --row-active:#eef2f8;
+  --seg-bg:#eef0f4; --seg-knob:#fff;
+  --dim-bg:#f6f7f9; --dim-line:#cbd2dd;
+
+  /* 平台色淡染的混合基底：事件条底色混面板、文字混墨色（暗色下反过来混白） */
+  --mix-bg:#fff; --mix-fg:#000;
+
+  --backdrop:rgba(16,20,28,.5);
+  --toast-bg:#15181e; --toast-ink:#fff;
+  --focus-ring:var(--focus-ring);
 
   /* 平台色不在这里：真值由 lib/agents.js 的 color 字段给出，JS 内联写到 --c 上
      （日历事件条、卡片左沿、图例点、rail 行都用同一份），避免两处色值走散 */
@@ -50,11 +82,65 @@
      原来每块都有 8px/24px 的投影，叠在一起页面发灰。 */
   --sh-rest:0 1px 2px rgba(21,24,30,.04);
   --sh-float:0 12px 32px rgba(21,24,30,.12),0 2px 6px rgba(21,24,30,.06);
+  --sh-card-hover:0 6px 18px rgba(21,24,30,.07);
+  --sh-knob:0 1px 2px rgba(21,24,30,.10),0 1px 1px rgba(21,24,30,.04);
 
   /* 动效：一次一条曲线，别每个组件各写一条 */
   --e-out:cubic-bezier(.22,.61,.36,1);
   --e-spring:cubic-bezier(.3,1.18,.5,1);
   --d-fast:.12s; --d-mid:.2s; --d-slow:.45s;
+}
+
+/* 深色：只换 token，不动组件。正文对比度实测（#171a20 面板）：
+   ink 14.8:1、ink-2 9.5:1、ink-3 6.7:1；状态色 8.6–10.5:1 全过 AA */
+@media(prefers-color-scheme:dark){
+  :root{
+    --ink:#e9edf3; --ink-2:#b7c0cd; --ink-3:#97a1b0;
+    --ink-faint:#7b8494; --ink-past:#7b8494;
+
+    --bg:#0f1115; --panel:#171a20; --panel-2:#1e222a; --field:#1b1f26;
+    --line:rgba(233,237,243,.14); --line-2:rgba(233,237,243,.08);
+    --line-strong:rgba(233,237,243,.24);
+    --grid-line:rgba(233,237,243,.10);
+
+    --action:#2f63e6; --action-ink:#9db9ff; --action-hover:#2a5ad4;
+    --action-wash:rgba(63,116,240,.16);
+    --action-line:rgba(157,185,255,.35); --action-strong:#244fbf; --on-accent:#fff;
+    --sync-a:#3f74f0; --sync-b:#6f9bff; --sheen:rgba(255,255,255,.28);
+
+    --warn:#f0a26a; --ok:#3ecfa2;
+    --ok-ink:#4bd6a8; --ok-bg:rgba(75,214,168,.12); --ok-line:rgba(75,214,168,.35);
+    --info-bg:rgba(91,140,255,.14); --info-line:rgba(157,185,255,.32);
+    --warn-bg:rgba(240,162,106,.12); --warn-line:rgba(240,162,106,.35);
+    --warn-mid-bg:rgba(240,162,106,.18);
+    --warn-soft-bg:rgba(240,162,106,.10); --warn-chip-bg:rgba(240,162,106,.14);
+    --warn-chip-line:rgba(240,162,106,.38);
+    --warn-ink:#f3b57c; --warn-ink-2:#f0c08e; --warn-ink-3:#f2ad80;
+    --danger:#ff8a80; --danger-fill:#d33a33;
+    --danger-ink:#ff9b91; --danger-bg:rgba(255,138,128,.14);
+    --danger-soft-bg:rgba(255,138,128,.10);
+    --danger-line:rgba(255,138,128,.40); --danger-line-strong:rgba(255,138,128,.62);
+    --danger-hover:#b3261e;
+
+    --chip-bg:#232833;
+    --neutral-bg:#232833; --neutral-2-bg:#20252d;
+    --cell-hover:rgba(91,140,255,.06); --cell-out:#14171c;
+    --cell-weekend:#181b21; --cell-weekend-out:#13161b;
+    --row-hover:#20252d; --row-active:#262c36;
+    --seg-bg:#232833; --seg-knob:#2c333f;
+    --dim-bg:#20252d; --dim-line:#3a4150;
+
+    --mix-bg:var(--panel); --mix-fg:#fff;
+
+    --backdrop:rgba(0,0,0,.62);
+    --toast-bg:#e9edf3; --toast-ink:#12151a;
+    --focus-ring:rgba(91,140,255,.28);
+
+    --sh-rest:0 1px 2px rgba(0,0,0,.5);
+    --sh-float:0 18px 48px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+    --sh-card-hover:0 6px 18px rgba(0,0,0,.45);
+    --sh-knob:0 1px 2px rgba(0,0,0,.5),0 1px 1px rgba(0,0,0,.35);
+  }
 }
 
 *{box-sizing:border-box}
@@ -93,9 +179,9 @@ button{
   transition:background var(--d-fast) var(--e-out),border-color var(--d-fast) var(--e-out),
              color var(--d-fast) var(--e-out),transform var(--d-fast) var(--e-out);
 }
-button:hover{background:var(--panel-2);border-color:rgba(21,24,30,.2)}
+button:hover{background:var(--panel-2);border-color:var(--line-strong)}
 button:active{transform:translateY(1px)}
-button.primary{background:var(--action);border-color:var(--action);color:#fff;font-weight:560}
+button.primary{background:var(--action);border-color:var(--action);color:var(--on-accent);font-weight:560}
 button.primary:hover{background:var(--action-hover);border-color:var(--action-hover)}
 button.primary:disabled{opacity:.55;cursor:default;transform:none}
 button.mini{padding:4px 9px;font-size:var(--t-xs);border-radius:var(--r-sm);color:var(--ink-2)}
@@ -107,7 +193,7 @@ button.mini:hover{color:var(--ink)}
   border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink-2);
   transition:background var(--d-fast) var(--e-out),border-color var(--d-fast) var(--e-out),color var(--d-fast) var(--e-out);
 }
-.gh-link:hover{background:var(--panel-2);border-color:rgba(21,24,30,.2);color:var(--ink)}
+.gh-link:hover{background:var(--panel-2);border-color:var(--line-strong);color:var(--ink)}
 .gh-link svg{width:17px;height:17px;fill:currentColor;display:block}
 
 /* 004 ·「立即同步」自己变成进度条：同步时底色从左往右填（进度来自后台逐个平台
@@ -119,14 +205,14 @@ button.mini:hover{color:var(--ink)}
 }
 #sync .bar{
   position:absolute;left:0;top:0;bottom:0;width:100%;border-radius:var(--r-sm) 0 0 var(--r-sm);
-  background:linear-gradient(90deg,#3f7bff,#6fa4ff);
+  background:linear-gradient(90deg,var(--sync-a),var(--sync-b));
   transform:scaleX(var(--p,0));transform-origin:0 50%;
   transition:transform .55s var(--e-out),opacity .3s;pointer-events:none;
 }
 /* 一个平台可能要跑十几秒，进度值不变的时候得让人看出"还在动"——只做光带，不改进度 */
 #sync[data-st="run"] .bar::after{
   content:"";position:absolute;inset:0;border-radius:inherit;
-  background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.3) 50%,transparent 65%);
+  background:linear-gradient(100deg,transparent 35%,var(--sheen) 50%,transparent 65%);
   background-size:220% 100%;animation:syncShine 2.4s linear infinite;
 }
 @keyframes syncShine{from{background-position:120% 0}to{background-position:-80% 0}}
@@ -134,9 +220,9 @@ button.mini:hover{color:var(--ink)}
 #sync .ck{position:relative;display:none;vertical-align:-2px}
 #sync .ck svg{width:14px;height:14px;display:block;fill:none;stroke:currentColor;
   stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
-#sync[data-st="run"]{background:#1f4fc4;border-color:#1f4fc4;color:#fff;opacity:1;cursor:default}
-#sync[data-st="run"]:hover{background:#1f4fc4;border-color:#1f4fc4}
-#sync[data-st="fold"],#sync[data-st="done"],#sync[data-st="fail"]{color:#fff;opacity:1}
+#sync[data-st="run"]{background:var(--action-strong);border-color:var(--action-strong);color:var(--on-accent);opacity:1;cursor:default}
+#sync[data-st="run"]:hover{background:var(--action-strong);border-color:var(--action-strong)}
+#sync[data-st="fold"],#sync[data-st="done"],#sync[data-st="fail"]{color:var(--on-accent);opacity:1}
 #sync[data-st="fold"] .bar,#sync[data-st="done"] .bar,#sync[data-st="fail"] .bar{opacity:0}
 #sync[data-st="fold"]{background:var(--ok);border-color:var(--ok);padding:7px 11px}
 #sync[data-st="done"]{background:var(--ok);border-color:var(--ok)}
@@ -147,7 +233,7 @@ button.mini:hover{color:var(--ink)}
 
 /* 提示条：唯一用暖色底的容器，只出现在真需要人注意的时候 */
 .banner{
-  background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;
+  background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink-3);
   border-radius:var(--r-md);padding:10px 14px;font-size:var(--t-sm);
   line-height:1.55;margin-bottom:var(--s4);
 }
@@ -161,7 +247,7 @@ button.mini:hover{color:var(--ink)}
   padding:var(--s4);position:relative;overflow:hidden;box-shadow:var(--sh-rest);
   transition:box-shadow var(--d-mid) var(--e-out),border-color var(--d-mid) var(--e-out),transform var(--d-mid) var(--e-out);
 }
-.card:hover{box-shadow:0 6px 18px rgba(21,24,30,.07);border-color:rgba(21,24,30,.18);transform:translateY(-1px)}
+.card:hover{box-shadow:var(--sh-card-hover);border-color:var(--line-strong);transform:translateY(-1px)}
 /* 左侧 3px 平台色：数据编码，不是装饰 */
 .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c)}
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);margin-bottom:var(--s3)}
@@ -177,12 +263,12 @@ button.mini:hover{color:var(--ink)}
 /* 状态胶囊：一档底色一档字色，全部 5:1 以上 */
 .chip{
   font-size:var(--t-xs);padding:3px 8px;border-radius:var(--r-pill);
-  background:#f1f3f7;color:var(--ink-2);border:1px solid var(--line);white-space:nowrap;
+  background:var(--chip-bg);color:var(--ink-2);border:1px solid var(--line);white-space:nowrap;
   font-weight:500;line-height:1.35;
 }
-.chip.b{background:#ecfdf5;border-color:#bbf7d0;color:#047857}
-.chip.h{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
-.chip.m{background:#fef3c7;border-color:#fde68a;color:#92400e}
+.chip.b{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-ink)}
+.chip.h{background:var(--info-bg);border-color:var(--info-line);color:var(--action-ink)}
+.chip.m{background:var(--warn-chip-bg);border-color:var(--warn-chip-line);color:var(--warn-ink-2)}
 
 .card-acts{display:flex;align-items:center;gap:var(--s1)}
 .card-refresh{
@@ -190,7 +276,7 @@ button.mini:hover{color:var(--ink)}
   display:inline-flex;align-items:center;justify-content:center;color:var(--ink-3);
   border-color:transparent;background:transparent;
 }
-.card-refresh:hover{color:var(--action-ink);border-color:#c7d2fe;background:var(--action-wash)}
+.card-refresh:hover{color:var(--action-ink);border-color:var(--action-line);background:var(--action-wash)}
 .card-refresh:disabled{opacity:.45;cursor:default;background:transparent;border-color:transparent}
 
 /* 等宽数字 + 收紧字距，两件事是一套的，别单独改其中一个：
@@ -232,10 +318,10 @@ button.mini:hover{color:var(--ink)}
 /* 到期倒计时：唯一用红/橙的地方，其余状态一律走中性灰 */
 .cd{display:inline-block;margin-top:var(--s3);font-size:var(--t-xs);font-weight:560;
   padding:3px 9px;border-radius:var(--r-pill);line-height:1.35}
-.cd.hot{background:#fee2e2;color:#b91c1c}
-.cd.warm{background:#ffedd5;color:#9a3412}
-.cd.cool{background:#eef2f7;color:var(--ink-2)}
-.cd.none{background:#f1f5f9;color:var(--ink-3)}
+.cd.hot{background:var(--danger-bg);color:var(--danger-ink)}
+.cd.warm{background:var(--warn-mid-bg);color:var(--warn-ink-3)}
+.cd.cool{background:var(--neutral-bg);color:var(--ink-2)}
+.cd.none{background:var(--neutral-2-bg);color:var(--ink-3)}
 
 .empty-b{color:var(--ink-3);font-size:var(--t-sm);margin-top:var(--s2);line-height:1.5}
 .wasted{
@@ -247,10 +333,10 @@ button.mini:hover{color:var(--ink)}
 }
 .wasted:hover{color:var(--warn)}
 .wasted b{color:var(--warn);font-weight:620}
-.wasted .ar{margin-left:auto;color:#b7bfcc;transition:transform var(--d-fast) var(--e-out)}
+.wasted .ar{margin-left:auto;color:var(--ink-faint);transition:transform var(--d-fast) var(--e-out)}
 .wasted:hover .ar{transform:translateX(2px)}
 .tstamp{margin-top:var(--s2);font-size:var(--t-xs);color:var(--ink-3)}
-.tstamp .mn{color:#92400e}
+.tstamp .mn{color:var(--warn-ink-2)}
 
 /* ============================================================
    5. 主区网格
@@ -285,19 +371,19 @@ button.mini:hover{color:var(--ink)}
 }
 .cell:nth-child(7n){border-right:0}
 .cell:nth-last-child(-n+7){border-bottom:0}
-.cell:hover{background:#f8fafe}
-.cell.out{background:#f8f9fb;cursor:default}
-.cell.out:hover{background:#f8f9fb}
-.cell.we{background:#fafbfc}
-.cell.we.out{background:#f6f7f9}
+.cell:hover{background:var(--cell-hover)}
+.cell.out{background:var(--cell-out);cursor:default}
+.cell.out:hover{background:var(--cell-out)}
+.cell.we{background:var(--cell-weekend)}
+.cell.we.out{background:var(--cell-weekend-out)}
 /* 选中态：内描边贴着格子，不撑开布局 */
 .cell.sel{box-shadow:inset 0 0 0 2px var(--action);background:var(--action-wash)}
 .cell.sel:hover{background:var(--action-wash)}
 
 .dnum{font-size:var(--t-xs);color:var(--ink-2);font-weight:540;display:flex;align-items:center;gap:5px;
   font-variant-numeric:tabular-nums;line-height:1.4}
-.cell.past .dnum{color:#a8b0bc}
-.dnum .td{background:var(--action);color:#fff;border-radius:5px;padding:0 5px;
+.cell.past .dnum{color:var(--ink-past)}
+.dnum .td{background:var(--action);color:var(--on-accent);border-radius:5px;padding:0 5px;
   font-size:var(--t-xs);line-height:17px;font-weight:600}
 
 .entries{margin-top:5px;display:flex;flex-direction:column;gap:4px}
@@ -309,15 +395,15 @@ button.mini:hover{color:var(--ink)}
 .e{
   display:flex;align-items:baseline;gap:4px;
   font-size:var(--t-xs);line-height:1.4;border-left:2px solid var(--c);padding:2px 4px;
-  background:color-mix(in srgb,var(--c) 7%,#fff);border-radius:0 var(--r-sm) var(--r-sm) 0;
+  background:color-mix(in srgb,var(--c) 7%,var(--mix-bg));border-radius:0 var(--r-sm) var(--r-sm) 0;
   white-space:nowrap;overflow:hidden;min-width:0;
 }
 .e b{
   flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
-  font-weight:620;color:color-mix(in srgb,var(--c) 72%,#000);
+  font-weight:620;color:color-mix(in srgb,var(--c) 72%,var(--mix-fg));
 }
 /* 已过期：降饱和 + 删除线，但保留历史合计 */
-.e.dim{background:#f6f7f9;border-left-color:#cbd2dd;opacity:.72}
+.e.dim{background:var(--dim-bg);border-left-color:var(--dim-line);opacity:.72}
 .e.dim b{color:var(--ink-3);text-decoration:line-through}
 .more{font-size:var(--t-xs);color:var(--ink-3);padding-left:5px}
 
@@ -339,8 +425,8 @@ button.cnt{background:none;border:0;border-radius:0;padding:0;font:inherit;curso
 
 .row{display:flex;align-items:center;gap:var(--s3);padding:9px var(--s2);border-radius:var(--r-sm);
   cursor:pointer;transition:background var(--d-fast) var(--e-out)}
-.row:hover{background:#f6f8fb}
-.row:active{background:#eef2f8}
+.row:hover{background:var(--row-hover)}
+.row:active{background:var(--row-active)}
 .row .bar{width:3px;align-self:stretch;background:var(--c);border-radius:2px;flex:none}
 .row .info{flex:1;min-width:0}
 .row .l1{font-size:var(--t-sm);font-weight:600;white-space:nowrap;overflow:hidden;
@@ -356,9 +442,9 @@ button.cnt{background:none;border:0;border-radius:0;padding:0;font:inherit;curso
    用弹簧曲线追上，滑块被拉长再收回 —— 这一下拉伸就是"会滑"的来源。
    位置全靠 calc 算（--i 只是列序号），不做 JS 测量、不监听 resize。 */
 .seg{position:relative;display:grid;grid-template-columns:repeat(4,1fr);
-  padding:2px;border-radius:var(--r-sm);background:#eef0f4;--i:0}
-.seg .knob{position:absolute;top:2px;bottom:2px;border-radius:6px;background:var(--panel);
-  box-shadow:0 1px 2px rgba(21,24,30,.10),0 1px 1px rgba(21,24,30,.04);pointer-events:none;
+  padding:2px;border-radius:var(--r-sm);background:var(--seg-bg);--i:0}
+.seg .knob{position:absolute;top:2px;bottom:2px;border-radius:6px;background:var(--seg-knob);
+  box-shadow:var(--sh-knob);pointer-events:none;
   left:calc(2px + (100% - 4px) * var(--i) / 4);
   right:calc(2px + (100% - 4px) * (3 - var(--i)) / 4)}
 .seg.go-r .knob{transition:right .22s var(--e-out),left .4s var(--e-spring) .04s}
@@ -383,8 +469,8 @@ button.cnt{background:none;border:0;border-radius:0;padding:0;font:inherit;curso
   border-radius:var(--r-sm);background:var(--panel);color:var(--ink);
   transition:border-color var(--d-fast) var(--e-out),box-shadow var(--d-fast) var(--e-out);
 }
-.fld input:hover,.fld select:hover{border-color:rgba(21,24,30,.2)}
-.fld input:focus,.fld select:focus{outline:none;border-color:var(--action);box-shadow:0 0 0 3px rgba(47,107,255,.14)}
+.fld input:hover,.fld select:hover{border-color:var(--line-strong)}
+.fld input:focus,.fld select:focus{outline:none;border-color:var(--action);box-shadow:0 0 0 3px var(--focus-ring)}
 .fld.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2)}
 .meta{font-size:var(--t-xs);color:var(--ink-3);line-height:1.7;
   border-top:1px dashed var(--line);padding-top:var(--s3);margin-top:var(--s3)}
@@ -392,13 +478,13 @@ button.cnt{background:none;border:0;border-radius:0;padding:0;font:inherit;curso
 .acts button{flex:1}
 
 /* 危险动作：未确认前只是红字描边，确认后才填红，避免手滑 */
-.danger{color:var(--danger);border-color:#fecaca}
-.danger:hover{background:#fef2f2;border-color:#fca5a5}
-.danger.armed{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff;font-weight:600}
-.danger.armed:hover{background:#a51f19;border-color:#a51f19}
+.danger{color:var(--danger);border-color:var(--danger-line)}
+.danger:hover{background:var(--danger-soft-bg);border-color:var(--danger-line-strong)}
+.danger.armed{background:var(--danger-fill);border-color:var(--danger-fill);color:var(--on-accent);font-weight:600}
+.danger.armed:hover{background:var(--danger-hover);border-color:var(--danger-hover)}
 
-.manual-flag{display:inline-block;font-size:var(--t-xs);background:#fef3c7;color:#92400e;
-  border:1px solid #fde68a;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.manual-flag{display:inline-block;font-size:var(--t-xs);background:var(--warn-chip-bg);color:var(--warn-ink-2);
+  border:1px solid var(--warn-chip-line);border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
 .hint{font-size:var(--t-xs);color:var(--ink-3);padding:0 var(--s4) var(--s3);line-height:1.65}
 
 /* ============================================================
@@ -410,7 +496,7 @@ footer b{color:var(--ink-2);font-weight:600}
 
 .toast{
   position:fixed;bottom:var(--s5);left:50%;transform:translateX(-50%) translateY(12px);opacity:0;
-  background:var(--ink);color:#fff;font-size:var(--t-sm);padding:10px var(--s4);border-radius:var(--r-md);
+  background:var(--toast-bg);color:var(--toast-ink);font-size:var(--t-sm);padding:10px var(--s4);border-radius:var(--r-md);
   transition:opacity .25s var(--e-out),transform .25s var(--e-out);pointer-events:none;
   max-width:min(560px,86vw);line-height:1.6;white-space:normal;box-shadow:var(--sh-float);z-index:60;
 }
@@ -427,7 +513,7 @@ dialog.box{background:var(--panel);border-radius:var(--r-lg);
 /* display 必须只给 [open]，否则会盖掉 UA 的关闭态 display:none */
 dialog.box[open]{display:flex;flex-direction:column}
 dialog.box:modal{overscroll-behavior:contain}
-dialog.box::backdrop{background:rgba(16,20,28,.5);backdrop-filter:blur(2px);
+dialog.box::backdrop{background:var(--backdrop);backdrop-filter:blur(2px);
   overflow:hidden;overscroll-behavior:contain}
 .box > h2{margin:0;padding:var(--s4) var(--s5);font-size:var(--t-h2);font-weight:640;
   letter-spacing:-.2px;border-bottom:1px solid var(--line-2)}
@@ -447,9 +533,9 @@ dialog.box::backdrop{background:rgba(16,20,28,.5);backdrop-filter:blur(2px);
 .arow .an i{width:9px;height:9px;border-radius:3px;background:var(--c);display:inline-block;flex:none}
 .arow input[type=url]{width:100%;min-width:0;font:inherit;font-size:var(--t-sm);padding:7px 10px;
   border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink)}
-.arow input[type=url]:focus{outline:none;border-color:var(--action);box-shadow:0 0 0 3px rgba(47,107,255,.14)}
+.arow input[type=url]:focus{outline:none;border-color:var(--action);box-shadow:0 0 0 3px var(--focus-ring)}
 /* 平台地址由代码预置、面板内只读：视觉上也要和可编辑输入区分开 */
-.arow input[type=url][readonly]{background:#f8fafc;color:var(--ink-2);cursor:default}
+.arow input[type=url][readonly]{background:var(--field);color:var(--ink-2);cursor:default}
 .arow input[type=url][readonly]:focus{border-color:var(--line);box-shadow:none}
 .arow .hintline{font-size:var(--t-xs);color:var(--ink-3);margin-top:4px}
 @media(max-width:720px){
@@ -458,20 +544,20 @@ dialog.box::backdrop{background:rgba(16,20,28,.5);backdrop-filter:blur(2px);
 }
 
 .cap{border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s3);margin-bottom:var(--s2)}
-.cap.hi{border-color:#86efac;background:#f0fdf4}
+.cap.hi{border-color:var(--ok-line);background:var(--ok-bg)}
 .cap .u{font-size:var(--t-sm);font-weight:600;word-break:break-all;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .cap .why{font-size:var(--t-xs);color:var(--ink-2);margin-top:5px;line-height:1.55}
 .cap pre{margin:var(--s2) 0 0;font-size:var(--t-xs);line-height:1.55;max-height:150px;overflow:auto;
-  background:#f8fafc;border:1px solid var(--line-2);border-radius:var(--r-sm);
+  background:var(--field);border:1px solid var(--line-2);border-radius:var(--r-sm);
   padding:var(--s2);white-space:pre-wrap;word-break:break-all}
 .cap .hh{font-size:var(--t-xs);color:var(--ink-3);margin-top:6px}
 
 .badge{font-size:var(--t-xs);padding:2px 8px;border-radius:var(--r-pill);
-  background:#fef3c7;color:#92400e;border:1px solid #fde68a;cursor:pointer;font-weight:500}
-.badge.ok{background:#ecfdf5;border-color:#bbf7d0;color:#047857}
+  background:var(--warn-chip-bg);color:var(--warn-ink-2);border:1px solid var(--warn-chip-line);cursor:pointer;font-weight:500}
+.badge.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-ink)}
 
-.conflict{background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-md);
+.conflict{background:var(--warn-soft-bg);border:1px solid var(--warn-chip-line);border-radius:var(--r-md);
   padding:var(--s3);margin:0 0 var(--s3);font-size:var(--t-sm);line-height:1.55}
 .conflict .r{display:flex;justify-content:space-between;gap:var(--s3);margin-top:6px}
 .conflict button{margin-top:var(--s2);width:100%}
@@ -484,13 +570,13 @@ dialog.box::backdrop{background:rgba(16,20,28,.5);backdrop-filter:blur(2px);
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
 #pasteUrl{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);
-  border-radius:var(--r-sm);background:#f8fafc;color:var(--ink);font-size:var(--t-sm)}
-#pasteUrl:focus,#pasteBody:focus{outline:none;border-color:var(--action);box-shadow:0 0 0 3px rgba(47,107,255,.14)}
+  border-radius:var(--r-sm);background:var(--field);color:var(--ink);font-size:var(--t-sm)}
+#pasteUrl:focus,#pasteBody:focus{outline:none;border-color:var(--action);box-shadow:0 0 0 3px var(--focus-ring)}
 #pasteBody{width:100%;box-sizing:border-box;margin-top:var(--s2);padding:8px 10px;
-  border:1px solid var(--line);border-radius:var(--r-sm);background:#f8fafc;color:var(--ink);
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--field);color:var(--ink);
   resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--t-xs);line-height:1.6}
 
-.privacy{font-size:var(--t-xs);color:var(--ink-2);background:#f8fafc;border:1px solid var(--line-2);
+.privacy{font-size:var(--t-xs);color:var(--ink-2);background:var(--field);border:1px solid var(--line-2);
   border-radius:var(--r-md);padding:var(--s3);line-height:1.7;margin-bottom:var(--s4)}
 .privacy b{color:var(--ink)}
 

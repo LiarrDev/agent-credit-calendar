@@ -635,7 +635,7 @@
     }
     box.innerHTML = u.map(function (b) {
       var d = N.daysLeft(b.expiresAt, TODAY);
-      var k = d <= 2 ? "#b91c1c" : d <= 7 ? "#9a3412" : "var(--ink-2)";
+      var k = d <= 2 ? "var(--danger-ink)" : d <= 7 ? "var(--warn-ink-3)" : "var(--ink-2)";
       return '<div class="row" role="button" tabindex="0" data-bid="' + b.batchId + '" style="--c:' + colorOf(b.agent) + '">'
         + '<span class="bar"></span><div class="info"><div class="l1">'
         + esc((doc.agents[b.agent] || {}).name || b.agent)
@@ -669,7 +669,7 @@
                 + esc((doc.agents[b.agent] || {}).name || b.agent) + "</div>"
                 + '<div class="l2">' + esc(b.label) + "</div>"
                 + '<div class="l2">' + esc(N.formatExpiry(b)) + " 到期"
-                + (isExpired(b) ? ' · <span style="color:#b91c1c">已过期</span>' : "") + "</div></div>"
+                + (isExpired(b) ? ' · <span style="color:var(--danger-ink)">已过期</span>' : "") + "</div></div>"
                 + '<div class="amt">' + fmt(b.unit, b.remaining) + "<small>" + unitLabel(b.unit) + "</small></div></div>";
             }).join("") + "</div>"
             + '<div class="sec-b" style="padding-top:2px"><button class="mini" data-act="add">+ 补录一笔到这天</button></div>'
@@ -751,8 +751,8 @@
   function expiryStatus(b) {
     var d = N.daysLeft(b.expiresAt, TODAY);
     if (d == null) return "到期日期未知";
-    if (isExpired(b)) return '<span style="color:#b91c1c">已过期' + (d < 0 ? " " + (-d) + " 天" : "") + "</span>";
-    return d === 0 ? '<span style="color:#b91c1c">今天到期</span>' : "还有 " + d + " 天";
+    if (isExpired(b)) return '<span style="color:var(--danger-ink)">已过期' + (d < 0 ? " " + (-d) + " 天" : "") + "</span>";
+    return d === 0 ? '<span style="color:var(--danger-ink)">今天到期</span>' : "还有 " + d + " 天";
   }
 
   function expiryMeta(b) {
@@ -801,10 +801,10 @@
       + (b.source === "manual" ? "手填时间 " : "取数时间 ")
       + new Date(b.capturedAt).toLocaleString("zh-CN")
       + '<span id="editExpiryMeta">' + expiryMeta(b) + "</span>"
-      + (b.updatedAt ? '<br><span style="color:#92400e">手动修改于 '
+      + (b.updatedAt ? '<br><span style="color:var(--warn-ink-2)">手动修改于 '
           + new Date(b.updatedAt).toLocaleString("zh-CN") + "（同步不再覆盖它的过期日）</span>" : "")
-      + (b.absentCount ? '<br><span style="color:#9a3412">最近 ' + b.absentCount + " 次同步没返回这笔</span>" : "")
-      + (b.closed ? '<br><span style="color:#9a3412">后台已不再返回这笔，当前<b>不计入余额</b>'
+      + (b.absentCount ? '<br><span style="color:var(--warn-ink-3)">最近 ' + b.absentCount + " 次同步没返回这笔</span>" : "")
+      + (b.closed ? '<br><span style="color:var(--warn-ink-3)">后台已不再返回这笔，当前<b>不计入余额</b>'
           + "（下次同步如果它回来了会自动恢复）</span>" : "")
       + "</div>"
       + '<div class="acts"><button class="primary" data-act="save">保存</button>'
@@ -867,22 +867,22 @@
           ? (hook ? "钩子已注入本页" : "钩子没注上（只有中继心跳），这家多半截不到，可用「粘贴样本」")
           : "还没收到钩子心跳：页面可能还没加载完，或钩子没注册上";
         if (fresh) live += "；本次已截到 " + fresh + " 条新样本";
-        return '<div class="hintline" style="color:#b45309"><b>等待授权中</b>：' + esc(live)
+        return '<div class="hintline" style="color:var(--warn-ink)"><b>等待授权中</b>：' + esc(live)
           + "。确认已在打开的页面里登录后不用再点按钮，截到额度接口会自动写入日历"
           + "（还剩约 " + left + " 分钟）。" + note + "</div>";
       }
-      return '<div class="hintline" style="color:#b45309"><b>等待已超时</b>：如果已经登录，点「重新打开页面」重试。'
+      return '<div class="hintline" style="color:var(--warn-ink)"><b>等待已超时</b>：如果已经登录，点「重新打开页面」重试。'
         + note + "</div>";
     }
     var r = a.authResult;
     if (!r) return "";
     if (r.ok) {
-      return '<div class="hintline" style="color:#047857"><b>最近一次授权完成</b>：'
+      return '<div class="hintline" style="color:var(--ok-ink)"><b>最近一次授权完成</b>：'
         + esc(r.message || "已写入日历") + (r.added ? "（新增 " + r.added + " 笔）" : "")
         + (r.closed ? "（" + r.closed + " 笔后台已不再返回）" : "")
         + (r.at ? " · " + hm(r.at) : "") + "</div>";
     }
-    return '<div class="hintline" style="color:#b45309"><b>最近一次授权未完成</b>：'
+    return '<div class="hintline" style="color:var(--warn-ink)"><b>最近一次授权未完成</b>：'
       + esc(r.message || r.reason || "未知原因") + "</div>";
   }
 
@@ -965,13 +965,13 @@
             + (caps.length ? " · 已截获 " + caps.length + " 条样本" + (newest ? "（最新 " + hm(newest.at) + "）" : "") : "")
             + (direct
                 ? " · " + (a.lastError
-                    ? '<b style="color:#b45309">上次读取：' + esc(a.lastError) + "</b>"
-                    : '<b style="color:#047857">不装钩子，点「刷新余额」实时读取</b>')
+                    ? '<b style="color:var(--warn-ink)">上次读取：' + esc(a.lastError) + "</b>"
+                    : '<b style="color:var(--ok-ink)">不装钩子，点「刷新余额」实时读取</b>')
                 : (authed ? " · 已授权 " + esc(a.origin) : "")
                   + (authed ? " · " + (a.hookActive
-                      ? '<b style="color:#047857">钩子在（同步会实时读取）</b>'
-                      : '<b style="color:#b45309">钩子已解除（同步时临时装一次，读完注销）</b>') : ""))
-            + (direct ? "" : (a.lastError ? '<div class="hintline" style="color:#b91c1c">' + esc(a.lastError) + "</div>" : ""))
+                      ? '<b style="color:var(--ok-ink)">钩子在（同步会实时读取）</b>'
+                      : '<b style="color:var(--warn-ink)">钩子已解除（同步时临时装一次，读完注销）</b>') : ""))
+            + (direct ? "" : (a.lastError ? '<div class="hintline" style="color:var(--danger-ink)">' + esc(a.lastError) + "</div>" : ""))
             + (direct ? "" : authStatusLine(a))
             + "</div></div>"
             + '<div class="abtns">' + btns + "</div></div>";
@@ -1099,7 +1099,7 @@
           + (x.tabUrl && x.tabUrl !== a.consoleUrl ? "，最终停在 " + esc(x.tabUrl) : "");
       }).join("<br>") || "无";
       return '<div style="margin:12px 0 6px;font-size:13px;font-weight:600;color:'
-        + (v.ok ? "#047857" : "#b91c1c") + '">最近一次「刷新余额」的诊断 · '
+        + (v.ok ? "var(--ok-ink)" : "var(--danger-ink)") + '">最近一次「刷新余额」的诊断 · '
         + v.text + "</div>"
         + '<div class="sec-b diag">'
         + row("取数方式", "页面内直读（MAIN world，不装钩子）")
@@ -1124,7 +1124,7 @@
         + (x.tabUrl && x.tabUrl !== a.consoleUrl ? "，最终停在 " + esc(x.tabUrl) : "");
     }).join("<br>") || "无";
     return '<div style="margin:12px 0 6px;font-size:13px;font-weight:600;color:'
-      + (v.ok ? "#047857" : "#b91c1c") + '">最近一次「刷新余额」的诊断 · '
+      + (v.ok ? "var(--ok-ink)" : "var(--danger-ink)") + '">最近一次「刷新余额」的诊断 · '
       + v.text + "</div>"
       + '<div class="sec-b diag">'
       + row("钩子注入", p.hookAt ? "MAIN world 已起来 " + esc(hm(p.hookAt))
@@ -1185,7 +1185,7 @@
             + (c.requestHeaderNames && c.requestHeaderNames.length
                 ? '<div class="hh">请求头（只有名字，无值）：' + esc(c.requestHeaderNames.join(", ")) + "</div>" : "")
             + (c.truncated
-                ? '<div class="hh" style="color:#9a3412">响应体被截断（共 ' + c.bodyLength
+                ? '<div class="hh" style="color:var(--warn-ink-3)">响应体被截断（共 ' + c.bodyLength
                   + " 字节，只存了前面一段），批次数组可能在后半段 —— 点「刷新余额」再试一次</div>" : "")
             + (c.bodyPreview && c.bodyPreview.length > CAP_PREVIEW
                 // 完整响应默认不铺开：WorkBuddy 单条就有 130KB，六十条一起渲染会把页面卡死。
@@ -1289,7 +1289,7 @@
       + "④ 每个 agent 有取数档位；⑤ 已过期批次降饱和加删除线、不计入可用余额；⑥ 抓取结果可手动修正，"
       + "改过的批次冻结并由你裁决冲突；⑦ 时间措辞按档位区分；⑧ 行内两段式删除；⑨ 已过期未用完沉没成本。<br>"
       + "<b>还没做的</b>：到期通知；.ics 导出。<br>"
-      + '<a href="#" id="wipe" style="color:' + (wipeArmed ? "#b91c1c" : "var(--ink-3)") + '">'
+      + '<a href="#" id="wipe" style="color:' + (wipeArmed ? "var(--danger-ink)" : "var(--ink-3)") + '">'
       + (wipeArmed ? "确认清空全部数据？再点一次（批次 / 样本 / 授权配置都会删掉）"
                    : "清空本机数据重新开始")
       + "</a>"
