@@ -299,13 +299,17 @@
     if (!raw || !raw.agent) return null;
     var exp = toExpiresAt(raw.expiry != null ? raw.expiry : raw.expiresAt, raw.semantics, opts.yearHint);
     if (!exp) return null;
+    // 余额是接口事实，不能用 granted 或 0 猜一个补上。缺失、null、空串和非法数字
+    // 都不是「余额为 0」；明确返回的 0 则必须保留，否则旧余额会停在用光之前。
+    var remaining = numOr(raw.remaining, null);
+    if (remaining === null) return null;
 
     var b = {
       agent: raw.agent,
       label: String(raw.label == null ? "未命名批次" : raw.label).trim(),
       unit: raw.unit || "credits",
       granted: numOr(raw.granted, 0),
-      remaining: numOr(raw.remaining, numOr(raw.granted, 0)),
+      remaining: remaining,
       expiresAt: exp.expiresAt,
       resetInstant: exp.resetInstant,
       capturedAt: (opts.now || new Date()).toISOString(),

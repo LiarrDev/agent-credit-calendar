@@ -296,9 +296,9 @@ booted(ui).then(function (ext) {
     });
   });
 }).then(function () {
-  /* ---------- 4. 「已不在后台返回」不计入余额（v0.3.17） ----------
+  /* ---------- 4. 「已不在后台返回」不计入余额（v0.3.17，v1.1.2 起卡片不显示） ----------
    * 真机症状：卡片写着「可用 2115」，平台后台只有 1984，差的是 5 笔已经消失的批次。
-   * 这里钉住三件事：卡片余额不含它们、卡片上要说出来、日历/即将到期不画它们。
+   * 这里钉住三件事：卡片余额不含它们、卡片上不再显示 gone 行（v1.1.2）、日历/即将到期不画它们。
    */
   var day = function (n) {
     var d = new Date(); d.setDate(d.getDate() + n);
@@ -323,7 +323,7 @@ booted(ui).then(function (ext) {
       .filter(function (s) { return s.indexOf('data-agent="lobsterai"') >= 0; })[0] || "";
     ok("卡片余额不含已消失的批次（500+100，不是 700）", seg.indexOf("600") >= 0, seg.slice(0, 260));
     ok("卡片上没有把消失的 100 算进余额", seg.indexOf("可用") >= 0 && seg.indexOf("700") < 0, seg.slice(0, 260));
-    ok("卡片上明说「已不在后台返回」", seg.indexOf("已不在后台返回") >= 0, seg.slice(0, 400));
+    ok("卡片上不再显示「已不在后台返回」行（v1.1.2）", seg.indexOf("已不在后台返回") < 0, seg.slice(0, 400));
     ok("「即将到期」不列已消失的批次",
       ext.el("#upcoming").innerHTML.indexOf("消失的 C") < 0, ext.el("#upcoming").innerHTML.slice(0, 300));
     ok("月历不画已消失的批次", ext.el("#grid").innerHTML.indexOf("消失的 C") < 0);
@@ -784,6 +784,60 @@ booted(ui).then(function (ext) {
           && sent[0].origin === "https://www.trae.cn"
           && sent[0].url === "https://www.trae.cn/dashboard", sent);
     });
+  });
+}).then(function () {
+  /* ---------- 14. 余额未返回 ≠ 0（v1.1.2） ----------
+   * 规则：接口明确返回的 0 是有效数据，必须显示；缺失/连续缺席/请求失败的
+   * 批次不进卡片、月历和「即将到期」，也不许拿旧缓存画成 0；手动录入不受
+   * 接口状态影响；日明细保留这些批次并注明不显示的原因。
+   */
+  var seed = seedDoc(2), day = "2026-10-26";
+  seed.agents.trae = { id: "trae", name: "TRAE", fetchMode: "capture", origin: "https://www.trae.cn", enabled: true, lastError: "HTTP 401" };
+  seed.agents.lobsterai = { id: "lobsterai", name: "LobsterAI", fetchMode: "capture", origin: "https://lobsterai.youdao.com", enabled: true };
+  seed.batches = [
+    Object.assign(expiryBatch("zero-ok", day), { remaining: 0 }),
+    Object.assign(expiryBatch("miss-2", day), { remaining: 500, absentCount: 2 }),
+    Object.assign(expiryBatch("req-fail", day, null, "trae"), { remaining: 300 }),
+    Object.assign(expiryBatch("manual-keep", day, null, "trae"), { source: "manual", manualEdited: true, absentCount: 3 }),
+    Object.assign(expiryBatch("all-ghost", day, null, "lobsterai"), { remaining: 400, absentCount: 1 })
+  ];
+  return booted(createUi(seed, "2026-10-23T12:00:00")).then(function (ext) {
+    // DOM 桩走整块重写路径，卡片没有外层 <div class="card">，按 card-head 切。
+    function cardOf(agent) {
+      return (ext.el("#cards").innerHTML.split('<div class="card-head">')
+        .filter(function (s) { return s.indexOf('data-agent="' + agent + '"') >= 0; })[0]) || "";
+    }
+    var q = cardOf("qoder"), t = cardOf("trae"), l = cardOf("lobsterai");
+    ok("卡片：明确返回的 0 正常显示为 0（不是「暂无数据」）",
+      q.includes('class="balance">0<') && q.includes("1 个批次"), q.slice(0, 300));
+    ok("卡片：连续缺席的批次不计入余额（500 不出现）", q.indexOf("500") < 0, q.slice(0, 300));
+    ok("卡片：卡片上说明几笔未返回不显示", q.includes("1 笔未返回不显示"), q.slice(0, 400));
+    ok("卡片：请求失败的平台不显示旧余额（300 不出现）", t.indexOf("300") < 0, t.slice(0, 300));
+    ok("卡片：手动录入不受缺席/请求失败影响",
+      t.includes('class="balance">100<') && t.includes("1 个批次"), t.slice(0, 300));
+    ok("卡片：平台全部未返回时显示「暂无余额数据」而非 0",
+      l.includes("暂无余额数据") && l.indexOf('class="balance">0<') < 0, l.slice(0, 400));
+    ok("卡片：全部未返回时余额画 —（未知）而不是 0",
+      /class="balance"[^>]*>—/.test(l), l.slice(0, 400));
+
+    var cell = dayHtml(ext, day);
+    ok("月历：未返回余额的批次不进格子（500/300/400 都不出现）",
+      cell.indexOf("500") < 0 && cell.indexOf("300") < 0 && cell.indexOf("400") < 0, cell);
+    ok("月历：0 余额与手动批次照常进格子", cell.includes("<b>Qoder</b> 0") && cell.includes("<b>TRAE</b> 100"), cell);
+
+    var up = rowIds(ext.el("#upcoming").innerHTML);
+    ok("即将到期：未返回的批次全部剔除",
+      ["miss-2", "req-fail", "all-ghost"].every(function (id) { return up.indexOf(id) < 0; }), up);
+    ok("即将到期：0 余额与手动批次仍在", up.includes("zero-ok") && up.includes("manual-keep"), up);
+
+    clickDay(ext, day, true);
+    var detail = ext.el("#detail").innerHTML, ids = rowIds(detail);
+    ok("日明细：未返回批次保留可见（备查、可进编辑）",
+      ["miss-2", "req-fail", "all-ghost"].every(function (id) { return ids.indexOf(id) >= 0; }), ids);
+    ok("日明细：注明连续缺席原因", detail.includes("最近 2 次未返回，日历不显示"), detail.slice(0, 500));
+    ok("日明细：注明请求失败原因", detail.includes("请求失败，日历不显示旧余额"), detail.slice(0, 500));
+    ok("日明细：0 余额仍显示 0 而非 —",
+      (detail.split('data-bid="zero-ok"')[1] || "").split('data-bid="')[0].includes(">0<"), detail.slice(0, 500));
   });
 }).then(function () {
   /* 卡片排序必须走 CSS order，不能 insertBefore 搬节点：

@@ -143,7 +143,7 @@
       return N.normalizeBatch(Object.assign({ agent: agentId, unit: "credits", source: "auto" }, r), { now: now });
     }).filter(Boolean);
     if (!batches.length) {
-      return { ok: false, reason: "no-rows", message: "认出了条目，但没有一条能拿到合法的到期日" };
+      return { ok: false, reason: "no-rows", message: "认出了条目，但没有一条能同时拿到合法余额和到期日" };
     }
     return {
       ok: true, batches: batches,

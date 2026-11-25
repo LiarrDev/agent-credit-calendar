@@ -78,6 +78,25 @@ eq("batchId 稳定", nb.batchId, N.normalizeBatch({
   agent: "trae", label: "Monthly Speed Points", granted: 30000, remaining: 4200,
   expiry: "2026-11-01" }, { now: today }).batchId);
 
+/* ---------- 余额未返回就不是 0（v1.1.2） ----------
+ * 接口没给 remaining 时，旧的兜底是拿 granted 顶上——把「不知道」画成了
+ * 「全额可用」，余额只多不少。规则改为：缺失、null、空串、非数字一律
+ * 不产批次；明确返回的 0 必须保留，否则用光的钱会停在用光之前。 */
+eq("剩余量缺失 -> 不产批次",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, expiry: "2026-11-01" }, { now: today }), null);
+eq("剩余量 null -> 不产批次",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, remaining: null, expiry: "2026-11-01" }, { now: today }), null);
+eq("剩余量空串 -> 不产批次",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, remaining: "", expiry: "2026-11-01" }, { now: today }), null);
+eq("剩余量非数字 -> 不产批次",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, remaining: "很多", expiry: "2026-11-01" }, { now: today }), null);
+eq("缺失时不再拿 granted 顶上（granted 只是参考数字）",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, expiry: "2026-11-01" }, { now: today }), null);
+eq("明确返回 0 是有效数据，必须保留",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, remaining: 0, expiry: "2026-11-01" }, { now: today }).remaining, 0);
+eq("字符串 0 照样归一成数字 0",
+  N.normalizeBatch({ agent: "trae", label: "A", granted: 3000, remaining: "0", expiry: "2026-11-01" }, { now: today }).remaining, 0);
+
 /* ---------- merge：三种关键情形 ---------- */
 function mk(o) {
   return Object.assign({

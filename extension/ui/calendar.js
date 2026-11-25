@@ -62,6 +62,8 @@
     return Math.round(s / 86400) + " 天前";
   }
   function fmt(unit, n) {
+    // 「未知」与「明确为 0」必须分开；任何汇总或旧文档里的坏值都不能被画成 0。
+    if (typeof n !== "number" || !isFinite(n)) return "—";
     if (unit === "tokens") {
       if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
       if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
@@ -142,6 +144,32 @@
    * 但一分钱都不该计入余额、日历和「即将到期」——它已经不在后台了，
    * 余额是 0 也好、被平台回收也好，本机都无从知道，唯一确定的结论是"这钱不在了"。 */
   function isGone(b) { return b.closed === true; }
+  function hasBalanceValue(b) {
+    return !!b && typeof b.remaining === "number" && isFinite(b.remaining);
+  }
+  function isManual(b) { return b.source === "manual"; }
+  function requestFailed(b) {
+    return !isManual(b) && !!((doc.agents[b.agent] || {}).lastError);
+  }
+  /* 主视图只展示当前可确认的余额：
+   * - 明确返回 0 是有效数据，必须显示；缺失、null、NaN 不是 0。
+   * - 自动批次本次没返回（absentCount > 0）或最近请求失败时，不拿旧缓存补位。
+   * - 手动录入是用户明确提供的数据，不受接口缺席/失败影响。
+   * 数据本身始终保留；日明细和编辑面板负责说明它为什么没进主视图。 */
+  function hasReturnedBalance(b) {
+    if (isGone(b) || !hasBalanceValue(b)) return false;
+    if (isManual(b)) return true;
+    return !(Number(b.absentCount) > 0) && !requestFailed(b);
+  }
+  function balanceNote(b) {
+    if (hasReturnedBalance(b)) return "";
+    if (!hasBalanceValue(b)) return ' · <span style="color:var(--warn-ink-3)">余额未返回，日历不显示</span>';
+    if (requestFailed(b)) return ' · <span style="color:var(--warn-ink-3)">请求失败，日历不显示旧余额</span>';
+    if (!isManual(b) && Number(b.absentCount) > 0) {
+      return ' · <span style="color:var(--warn-ink-3)">最近 ' + Number(b.absentCount) + " 次未返回，日历不显示</span>";
+    }
+    return "";
+  }
   /* 右侧副列表的目标：'<agent>' = 已过期未用完；'<agent>|gone' = 已不在后台返回。
    * 复用同一个 wasted 状态（它已经在十几个 handler 里被置 null、也跟着 doc.ui 落盘），
    * 新开一个变量意味着每个重置点都要同步改，漏一个就会显示错的面板。 */
@@ -156,11 +184,13 @@
     for (var i = 0; i < doc.batches.length; i++) if (doc.batches[i].batchId === id) return doc.batches[i];
     return null;
   }
-  function expiringOn(dayStr) {
-    // 同一天里按精确到期时刻先后排（未知时刻靠日末），与「即将到期」用同一把尺子：
-    // 这两个列表说的是同一件事，顺序不该有两套解释。剩余量不参与排序。
-    return doc.batches.filter(function (b) { return !isGone(b) && b.expiresAt === dayStr; })
-      .sort(compareExpiry);
+  function expiringOn(dayStr, includeHidden) {
+    // 月历只拿已返回余额；日明细传 includeHidden，保留未返回项及原因，仍能进入编辑。
+    // 同一天里按精确到期时刻先后排（未知时刻靠日末），与「即将到期」用同一把尺子。
+    return doc.batches.filter(function (b) {
+      if (isGone(b) || b.expiresAt !== dayStr) return false;
+      return includeHidden || hasReturnedBalance(b);
+    }).sort(compareExpiry);
   }
   function compareExpiry(a, c) {
     var days = N.daysLeft(a.expiresAt, TODAY) - N.daysLeft(c.expiresAt, TODAY);
@@ -173,21 +203,22 @@
   function upcoming() {
     var lim = doc.settings.threshold;
     return doc.batches.filter(function (b) {
-      if (isGone(b) || isExpired(b)) return false;
+      if (!hasReturnedBalance(b) || isExpired(b)) return false;
       var d = N.daysLeft(b.expiresAt, TODAY); return d != null && d >= 0 && d <= lim;
     }).sort(compareExpiry);
   }
   function agentSummary(agent) {
     var all = doc.batches.filter(function (b) { return b.agent === agent; });
-    // 先劈掉"后台已经不再返回"的那批，再看过没过期：它们既不是可用余额，
-    // 也不是"过期作废"，是第三种状态（消失了），得单独说出来。
-    var gone = all.filter(isGone);
-    var live = all.filter(function (b) { return !isGone(b); });
+    // 主视图只认「当前可确认」的余额：closed、缺席、请求失败的一律不进卡片与
+    // 沉没成本合计；「已消失」的数据保留在存储里，卡片上不再显示（v1.1.2）。
+    var live = all.filter(hasReturnedBalance);
     var act = live.filter(function (b) { return !isExpired(b); });
     var exp = live.filter(function (b) { return isExpired(b); });
+    var hiddenAct = all.filter(function (b) {
+      return !isGone(b) && !hasReturnedBalance(b) && !isExpired(b);
+    });
     var total = 0; act.forEach(function (b) { total += b.remaining; });
     var lost = 0; exp.forEach(function (b) { lost += b.remaining; });
-    var goneSum = 0; gone.forEach(function (b) { goneSum += b.remaining; });
     var manualCount = 0, conflicts = 0;
     act.forEach(function (b) { if (b.manualEdited) manualCount++; if (b.conflict) conflicts++; });
     var soonest = null;
@@ -199,7 +230,7 @@
     return {
       agent: agent, name: cfg.name || agent, unit: cfg.unit || "credits",
       count: act.length, total: total, wasted: lost, wastedCount: exp.length,
-      goneCount: gone.length, goneSum: goneSum,
+      hiddenCount: hiddenAct.length, unknown: act.length === 0 && hiddenAct.length > 0,
       manualCount: manualCount, conflicts: conflicts, soonest: soonest,
       capturedAt: (newest && newest.capturedAt) || cfg.lastSyncAt || null,
       fetchMode: cfg.fetchMode || "unauthorized"
@@ -376,7 +407,7 @@
       m = ["授权中", "h"];
     }
     var cd;
-    if (!s.soonest) cd = '<span class="cd none">无有效积分</span>';
+    if (!s.soonest) cd = '<span class="cd none">' + (s.unknown ? "暂无余额数据" : "无有效积分") + "</span>";
     else {
       var d = N.daysLeft(s.soonest.expiresAt, TODAY);
       var k = d <= 2 ? "hot" : d <= 7 ? "warm" : "cool";
@@ -392,14 +423,19 @@
       + '<span class="chip ' + m[1] + '">' + m[0] + "</span></span></div>"
       + (s.count
         ? '<div class="balance">' + fmt(s.unit, s.total) + '<span class="u">' + unitLabel(s.unit) + " 可用</span></div>"
-        : '<div class="balance" style="color:var(--ink-3)">0<span class="u">' + unitLabel(s.unit) + "</span></div>")
+        : s.unknown
+          ? '<div class="balance" style="color:var(--ink-3)">—<span class="u">暂无余额数据</span></div>'
+          : '<div class="balance" style="color:var(--ink-3)">0<span class="u">' + unitLabel(s.unit) + "</span></div>")
       + (s.soonest
         ? '<div class="next">最近一笔 <b>' + esc(shortLbl(s.soonest.label)) + "</b> · "
           + s.soonest.expiresAt.slice(5).replace("-", "/") + " 到期</div>" + cd
-        : '<div class="empty-b">当前无未过期批次</div>')
+        : '<div class="empty-b">' + (s.unknown ? "未返回数据不展示，旧余额不作 0" : "当前无未过期批次") + "</div>")
       + '<div class="tstamp">' + (s.count
           ? s.count + " 个批次 · " + timeText(s)
-          : '0 个批次 · <span class="mn">还没有数据</span>')
+            + (s.hiddenCount ? " · " + s.hiddenCount + " 笔未返回不显示" : "")
+          : s.unknown
+            ? s.hiddenCount + " 笔未返回 · " + timeText(s)
+            : '0 个批次 · <span class="mn">还没有数据</span>')
       + (s.conflicts ? ' <button type="button" class="badge" data-act="conflicts" data-agent="' + s.agent + '">'
           + s.conflicts + " 笔待裁决</button>" : "") + "</div>"
       + (s.wastedCount
@@ -407,14 +443,8 @@
           + "已过期未用完 <b>" + fmt(s.unit, s.wasted) + unitTail(s.unit) + "</b>（" + s.wastedCount + " 笔）"
           + '<span class="ar">查看 ›</span></button>'
         : "")
-      // 第三种状态必须自己占一行：不是余额、也不是"过期作废"。
-      // 不写出来的话，用户只会看到"刷新了但余额没变"，然后去后台发现对不上。
-      + (s.goneCount
-        ? '<button type="button" class="wasted" data-act="closed" data-agent="' + s.agent + '">'
-          + "已不在后台返回 <b>" + fmt(s.unit, s.goneSum) + unitTail(s.unit) + "</b>（"
-          + s.goneCount + " 笔 · 已从余额剔除）"
-          + '<span class="ar">查看 ›</span></button>'
-        : "")
+      // 「已不在后台返回」不再上卡片（v1.1.2）：那批钱已不计入余额，卡片行只是噪音；
+      // 数据照旧留在存储里，旧会话持久化的 gone 面板状态也仍能打开（renderGone）。
       + "";
   }
 
@@ -519,7 +549,7 @@
   function renderCal() {
     var y = view[0], mo = view[1];
     var inMonth = doc.batches.filter(function (b) {
-      if (isGone(b)) return false;
+      if (!hasReturnedBalance(b)) return false;
       var d = N.parseYmd(b.expiresAt); return d && d.getFullYear() === y && d.getMonth() === mo;
     }).length;
     $("#moTitle").innerHTML = y + " 年 " + (mo + 1) + " 月<span>" + inMonth + " 笔到期</span>";
@@ -588,7 +618,7 @@
     $("#legend").innerHTML = ORDER().map(function (a) {
       return '<span class="lg" style="--c:' + colorOf(a) + '"><span class="dot"></span>'
         + esc((doc.agents[a] || {}).name || a) + "（" + unitLabel((doc.agents[a] || {}).unit || "credits") + "）</span>";
-    }).join("") + '<span class="lg" style="margin-left:auto;color:var(--ink-3)">仅标当日到期 · 同平台合并展示</span>';
+    }).join("") + '<span class="lg" style="margin-left:auto;color:var(--ink-3)">仅标当日到期 · 同平台合并展示 · 未返回的余额不显示（明细内注明原因）</span>';
   }
 
   /* ---------- 即将到期 ---------- */
@@ -659,7 +689,8 @@
     if (t) return t.kind === "gone" ? renderGone(box, t.agent) : renderWasted(box, t.agent);
 
     if (sel) {
-      var items = expiringOn(sel), d = N.daysLeft(sel, TODAY);
+      // 日明细传 true：未返回的批次也列出（带原因、可进编辑），只是不进月历与汇总。
+      var items = expiringOn(sel, true), d = N.daysLeft(sel, TODAY);
       box.innerHTML = '<div class="sec-h"><h3>' + sel.replace(/-/g, "/") + " 到期明细</h3>"
         + '<span class="cnt">' + (d < 0 ? "已过去" : d === 0 ? "今天" : "还有 " + d + " 天") + "</span></div>"
         + (items.length
@@ -669,7 +700,8 @@
                 + esc((doc.agents[b.agent] || {}).name || b.agent) + "</div>"
                 + '<div class="l2">' + esc(b.label) + "</div>"
                 + '<div class="l2">' + esc(N.formatExpiry(b)) + " 到期"
-                + (isExpired(b) ? ' · <span style="color:var(--danger-ink)">已过期</span>' : "") + "</div></div>"
+                + (isExpired(b) ? ' · <span style="color:var(--danger-ink)">已过期</span>' : "")
+                + balanceNote(b) + "</div></div>"
                 + '<div class="amt">' + fmt(b.unit, b.remaining) + "<small>" + unitLabel(b.unit) + "</small></div></div>";
             }).join("") + "</div>"
             + '<div class="sec-b" style="padding-top:2px"><button class="mini" data-act="add">+ 补录一笔到这天</button></div>'
@@ -687,8 +719,10 @@
   function renderWasted(box, agent) {
     // 已消失的批次单独列在「已不在后台返回」里：两边都画会出现同一笔在两处，
     // 而卡片上那个合计只算过期、不算消失（agentSummary 的口径），数字对不上就成了新 bug。
-    var exp = doc.batches.filter(function (b) { return b.agent === agent && !isGone(b) && isExpired(b); })
-      .sort(function (a, c) { return a.expiresAt < c.expiresAt ? -1 : 1; });
+    // 与卡片同口径：未返回余额的过期批次也不进这个合计，只在日明细里备查。
+    var exp = doc.batches.filter(function (b) {
+      return b.agent === agent && hasReturnedBalance(b) && isExpired(b);
+    }).sort(function (a, c) { return a.expiresAt < c.expiresAt ? -1 : 1; });
     if (!exp.length) { wasted = null; return renderDetail(); }
     var sum = 0; exp.forEach(function (b) { sum += b.remaining; });
     var unit = (doc.agents[agent] || {}).unit || "credits";
@@ -720,6 +754,9 @@
    *
    * 保留历史而不删除的理由：用户可能想知道"那笔 100 是花掉的还是被平台收回的"，
    * 删掉就彻底查无此事了。点开还能手动改（改成 0 或改过期日）。
+   *
+   * v1.1.2 起卡片不再放「已不在后台返回」入口，新会话到不了这里；保留这个
+   * 渲染函数只为旧会话持久化的 '<agent>|gone' 面板状态仍能原样恢复、正常关闭。
    */
   function renderGone(box, agent) {
     var gone = doc.batches.filter(function (b) { return b.agent === agent && isGone(b); })
@@ -1425,8 +1462,6 @@
     if (cn) { openConsole(cn.getAttribute("data-agent")); return; }
     var w = e.target.closest('[data-act="wasted"]');
     if (w) { wasted = w.getAttribute("data-agent"); edit = null; adding = false; sel = null; persist(); render(); return; }
-    var g = e.target.closest('[data-act="closed"]');
-    if (g) { wasted = g.getAttribute("data-agent") + "|gone"; edit = null; adding = false; sel = null; persist(); render(); return; }
     var c = e.target.closest('[data-act="conflicts"]');
     if (c) {
       var first = doc.batches.filter(function (b) { return b.conflict && b.agent === c.getAttribute("data-agent"); })[0];
