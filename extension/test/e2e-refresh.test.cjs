@@ -52,7 +52,7 @@ var BODY = JSON.stringify({
 function createExt(dropOnChanged, fastWait, scriptResults) {
   var mem = {}, onChanged = [], msgListeners = [], tabSeq = 1000;
   // 写存储的次数：service worker 每次唤醒都会整份 set() 一次的话，扩展页会被
-  // onChanged 叫醒重画，正在填的补录表单就没了（见 background 的 retireQoderHook）。
+  // onChanged 叫醒重画，正在编辑的批次表单会被惊动（见 background 的 retireQoderHook）。
   var writes = 0;
 
   function fire(key, doc) {
@@ -338,8 +338,8 @@ function runRefresh(dropOnChanged, fastWait, scriptResults) {
 /**
  * 场景 6：service worker 每次唤醒都会跑一遍 retireQoderHook（顶层调用）。
  * 它以前无条件 CreditStore.update() = 整份文档 load + 序列化 + set，于是任意一个
- * 后台页心跳都会触发 onChanged → 扩展页 render()，把正在填的「补录批次」表单
- * 连同已输入内容冲掉。这里断言：Qoder 已是目标状态时，启动不产生任何写入。
+ * 后台页心跳都会触发 onChanged → 扩展页 render()，惊动用户正在操作的界面。
+ * 这里断言：Qoder 已是目标状态时，启动不产生任何写入。
  */
 function startupWriteChecks() {
   var ext = createExt(false, true);

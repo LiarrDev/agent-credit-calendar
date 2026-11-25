@@ -552,10 +552,6 @@ booted(ui).then(function (ext) {
     ext.tick();
     ok("定时器保留授权样本输入", ext.el("#authBody")._writes === pasteWrites && paste.value === '{"unfinished":');
     ext.el("#closeAuth").onclick();
-    clickAct(ext, "#detail", "add");
-    var addWrites = ext.el("#detail")._writes, addLabel = ext.el('#detail [data-nf="label"]');
-    addLabel.value = "补录草稿"; ext.tick();
-    ok("定时器保留补录表单", ext.el("#detail")._writes === addWrites && addLabel.value === "补录草稿");
   });
 }).then(function () {
   var html = fs.readFileSync(path.join(ROOT, "ui/calendar.html"), "utf8");

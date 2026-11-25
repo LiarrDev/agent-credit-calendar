@@ -19,11 +19,6 @@
   // 键盘选日期后整个 #grid 会重画，焦点随旧节点一起消失；记住要还焦点的格子。
   var focusDay = null;
   var authDlg = $("#mAuth");
-  /* 「正在填补录表单」的标记。语义与 edit 并列，但必须单独一个：
-   * renderAdd 不写 edit（补录的是还没有 batchId 的新批次），于是后台任何一次写入
-   * 触发的 onChanged 重画都会把表单连同已输入的内容冲掉 —— 而 service worker
-   * 每次唤醒都可能写一次存储。同理 renderDetail 在 adding 时也不能动 #detail。 */
-  var adding = false;
   var confirmTimer = null;
   // 样本详情的展开状态（key -> true）与当前渲染出来的样本列表（供导出按钮回查）。
   // 响应体最大 200KB 一条、最多 60 条，全量塞进 DOM 会直接把扩展页卡死，
@@ -125,7 +120,7 @@
         var typing = document.activeElement && document.activeElement.tagName === "INPUT"
           && document.activeElement.closest && document.activeElement.closest("#authBody");
         if (authOpen && !authView && !typing) renderAuth();
-        if (!edit && !adding && !authOpen) render();
+        if (!edit && !authOpen) render();
         else renderCards(), renderFresh(), renderNotice();
       });
     });
@@ -242,7 +237,7 @@
   function renderNotice() {
     var box = $("#notice"), msgs = [];
     if (!IS_EXT) {
-      msgs.push("当前是 <b>file:// 预览模式</b>：授权与抓取不可用，日历与手动录入照常工作。装进浏览器后这里会变成授权入口。");
+      msgs.push("当前是 <b>file:// 预览模式</b>：授权与抓取不可用，日历与批次编辑照常工作。装进浏览器后这里会变成授权入口。");
     }
     var conf = doc.batches.filter(function (b) { return b.conflict; }).length;
     if (conf) msgs.push("有 <b>" + conf + " 笔</b>积分的抓取值和你手填的值不一致，等你裁决（点卡片上的黄色标记）。");
@@ -659,8 +654,7 @@
     var u = upcoming(), box = $("#upcoming");
     setThr(doc.settings.threshold);
     if (!u.length) {
-      box.innerHTML = '<div class="none-yet">未来 ' + doc.settings.threshold + ' 天内无积分到期'
-        + (doc.batches.length ? "" : "，点日历里的任意一天可以补录") + "</div>";
+      box.innerHTML = '<div class="none-yet">未来 ' + doc.settings.threshold + ' 天内无积分到期</div>';
       return;
     }
     box.innerHTML = u.map(function (b) {
@@ -681,9 +675,6 @@
 
   function renderDetail() {
     var box = $("#detail");
-    // 正在填补录表单：谁也别动这块 DOM。重画一次就等于把用户刚敲的内容扔掉，
-    // 而 storage 变更、同步结果、定时刷新都会走到这里。
-    if (adding) return;
     if (edit) return renderEdit(box, byId(edit));
     var t = listTarget();
     if (t) return t.kind === "gone" ? renderGone(box, t.agent) : renderWasted(box, t.agent);
@@ -704,15 +695,13 @@
                 + balanceNote(b) + "</div></div>"
                 + '<div class="amt">' + fmt(b.unit, b.remaining) + "<small>" + unitLabel(b.unit) + "</small></div></div>";
             }).join("") + "</div>"
-            + '<div class="sec-b" style="padding-top:2px"><button class="mini" data-act="add">+ 补录一笔到这天</button></div>'
-          : '<div class="none-yet">这一天没有积分到期</div>'
-            + '<div class="sec-b" style="padding-top:2px"><button class="mini" data-act="add">+ 在这一天补录批次</button></div>');
+          : '<div class="none-yet">这一天没有积分到期</div>');
       return;
     }
 
     box.innerHTML = '<div class="sec-h"><h3>批次明细</h3></div>'
       + '<div class="hint">点日历里的色条查看当天逐笔明细，再选一笔查看和修正；也可以直接点「即将到期」里的任意一行。'
-      + "<br><br>抓取一定会出错，所以<b style=\"color:var(--ink-2)\">必须能手动改</b>：改过期日、改剩余量、删除、补录。"
+      + "<br><br>抓取一定会出错，所以<b style=\"color:var(--ink-2)\">必须能手动改</b>：改过期日、改剩余量、删除。"
       + "改过的批次会标「手动改动」，之后同步不再覆盖它的过期日，而是把抓取值留给你裁决。</div>";
   }
 
@@ -849,23 +838,6 @@
       + (delConfirm === b.batchId ? "确认删除这一笔？" : "删除") + "</button></div></div>";
   }
 
-  function renderAdd() {
-    var box = $("#detail");
-    var defDay = sel || N.ymd(N.addDays(TODAY, 30));
-    box.innerHTML = '<div class="sec-h"><h3>补录批次</h3>'
-      + '<button type="button" class="cnt" data-act="close">关闭 ✕</button></div>'
-      + '<div class="dt"><div class="ttl">新批次<span class="manual-flag">手动</span></div>'
-      + '<div class="lbl">抓不到的平台就走这条路，UI 上会如实标成手动录入。</div>'
-      + '<div class="fld"><label>Agent</label><select data-nf="agent">'
-      + ORDER().map(function (a) { return '<option value="' + a + '">' + esc(doc.agents[a].name) + "</option>"; }).join("")
-      + "</select></div>"
-      + '<div class="fld"><label>批次名称</label><input data-nf="label" placeholder="如：11月 套餐积分"></div>'
-      + '<div class="fld"><label>到期日期</label><input type="date" data-nf="expiresAt" value="' + defDay + '"></div>'
-      + '<div class="fld two"><div><label>剩余</label><input type="number" data-nf="remaining" value="1000" min="0"></div>'
-      + "<div><label>发放总量</label><input type=\"number\" data-nf=\"granted\" value=\"6000\" min=\"0\"></div></div>"
-      + '<div class="acts"><button class="primary" data-act="addsave">加入日历</button></div></div>';
-  }
-
   /* ---------- 授权与样本 ---------- */
 
   var AUTH_WAIT_MIN = 10;
@@ -941,7 +913,7 @@
       + '<ol class="steps">'
       + "<li><b>Qoder</b>：点「刷新余额」→ 自动开隐藏页读一次；若提示未登录，会在前台留下登录页，登录后再点一次</li>"
       + "<li><b>其余平台</b>：填后台地址 → 点授权 → 在打开的页面里登录，扩展截获疑似积分接口</li>"
-      + "<li>有样本后点「立即同步」产出批次；手动录入作为兜底永远可用</li>"
+      + "<li>有样本后点「立即同步」产出批次</li>"
       + "</ol>"
       + ORDER().map(function (id) {
           var staticAgent = AG.byId(id);
@@ -1241,7 +1213,7 @@
               + (a.lastHookAt
                   ? '钩子已经注入成功（' + ago(a.lastHookAt) + '），说明这个页面的额度数字不是用 XHR 取的 —— '
                     + "它大概率是服务端直接渲染进 HTML。在那个页面里点一下「用量/订阅」标签再回来；"
-                    + "要是还是没有，这一家就只能走手动录入。"
+                    + "要是还是没有，这一家暂时就抓不了。"
                   : a.lastRelayAt
                     ? "中转脚本注上了，但 MAIN world 的钩子没起来 —— 多半是注入被挡，"
                       + "看看 opera://extensions 里这个扩展有没有红字报错。"
@@ -1305,7 +1277,7 @@
       ? "数据截至 " + new Date(doc.lastSyncAt).toLocaleString("zh-CN",
           { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
         + "<br>" + (stale ? "<b>已超过 " + doc.settings.staleDays + " 天未同步，数字可能过时</b>" : "同步于 " + ago(doc.lastSyncAt))
-      : "尚未同步过<br>可先手动录入";
+      : "尚未同步过";
     var mode = IS_EXT
       ? "浏览器扩展 · 数据存在本机 chrome.storage.local"
       : "file:// 预览模式 · 数据存在本机 localStorage";
@@ -1449,7 +1421,7 @@
     TODAY = N.startOfDay(new Date());
     renderCards(); renderCal(); renderUpcoming(); renderFresh(); renderNotice();
     if (edit) refreshEditExpiry();
-    else renderDetail(); // renderDetail 自己保护补录表单
+    else renderDetail();
     // 不重画授权面板、页脚或同步按钮，保留输入、加载态和两段式确认。
   }
 
@@ -1461,11 +1433,11 @@
     var cn = e.target.closest('[data-act="console"]');
     if (cn) { openConsole(cn.getAttribute("data-agent")); return; }
     var w = e.target.closest('[data-act="wasted"]');
-    if (w) { wasted = w.getAttribute("data-agent"); edit = null; adding = false; sel = null; persist(); render(); return; }
+    if (w) { wasted = w.getAttribute("data-agent"); edit = null; sel = null; persist(); render(); return; }
     var c = e.target.closest('[data-act="conflicts"]');
     if (c) {
       var first = doc.batches.filter(function (b) { return b.conflict && b.agent === c.getAttribute("data-agent"); })[0];
-      if (first) { edit = first.batchId; adding = false; sel = null; wasted = null; persist(); render(); }
+      if (first) { edit = first.batchId; sel = null; wasted = null; persist(); render(); }
     }
   });
 
@@ -1474,7 +1446,7 @@
     if (!cell || cell.classList.contains("out")) return;
     var d = cell.getAttribute("data-day");
     sel = e.target.closest(".entries") ? d : (sel === d ? null : d);
-    edit = null; adding = false; wasted = null; delConfirm = null;
+    edit = null; wasted = null; delConfirm = null;
     persist(); render();
   });
 
@@ -1489,7 +1461,7 @@
 
   $("#upcoming").addEventListener("click", function (e) {
     var r = e.target.closest("[data-bid]"); if (!r) return;
-    edit = r.getAttribute("data-bid"); adding = false; sel = null; wasted = null; delConfirm = null;
+    edit = r.getAttribute("data-bid"); sel = null; wasted = null; delConfirm = null;
     persist(); render();
   });
 
@@ -1511,13 +1483,12 @@
     var t = e.target.closest("[data-act]");
     if (!t) {
       var r = e.target.closest("[data-bid]");
-      if (r) { edit = r.getAttribute("data-bid"); adding = false; delConfirm = null; persist(); render(); }
+      if (r) { edit = r.getAttribute("data-bid"); delConfirm = null; persist(); render(); }
       return;
     }
     var act = t.getAttribute("data-act");
 
-    if (act === "close") { edit = null; adding = false; wasted = null; delConfirm = null; clearTimeout(confirmTimer); persist(); renderDetail(); return; }
-    if (act === "add") { edit = null; adding = true; renderAdd(); return; }
+    if (act === "close") { edit = null; wasted = null; delConfirm = null; clearTimeout(confirmTimer); persist(); renderDetail(); return; }
 
     if (act === "accept") {
       var b0 = byId(edit); if (!b0) return;
@@ -1562,7 +1533,7 @@
       var next = N.applyManualEdit(cur, patch);
       if (!next) { toast("批次名称不能为空（只有空格也算空）"); return; }
       var oldId = cur.batchId;
-      // batchId 是 32 位哈希取前 8 位，理论上会撞。补录路径已经挡了，编辑路径也得挡：
+      // batchId 是 32 位哈希取前 8 位，理论上会撞：
       // byId() 只返回第一个匹配，撞了就变成"改 A 实际改了 B"，而且没有提示。
       if (next.batchId !== oldId && byId(next.batchId)) {
         toast("改完会和已有批次撞车（同名同到期日），改个名字或到期日再存");
@@ -1572,25 +1543,6 @@
       commit(function (f) { replaceIn(f, oldId, next); });
       render(); toast("已保存，该批次已冻结，抓取值将交给你裁决");
       return;
-    }
-
-    if (act === "addsave") {
-      var v = {};
-      $$("#detail [data-nf]").forEach(function (inp) { v[inp.getAttribute("data-nf")] = inp.value; });
-      // 只有空格的名字会变成 dedupKey 里的空段，两笔"空名"批次互相覆盖且看不出来
-      v.label = String(v.label || "").trim();
-      if (!v.label || !v.expiresAt) { toast("批次名称和过期日不能为空"); return; }
-      var cfg = doc.agents[v.agent] || {};
-      var nb = N.normalizeBatch({
-        agent: v.agent, label: v.label, granted: +v.granted || 0, remaining: +v.remaining || 0,
-        expiry: v.expiresAt, semantics: "lastUsableDay", unit: cfg.unit || "credits", source: "manual"
-      });
-      nb.manualEdited = true; nb.updatedAt = new Date().toISOString();
-      if (byId(nb.batchId)) { toast("已存在同名同到期日的批次（dedupKey 命中）"); return; }
-      adding = false;
-      sel = nb.expiresAt; edit = nb.batchId; wasted = null; delConfirm = null;
-      commit(function (f) { f.batches.push(nb); });
-      render(); toast("已加入日历");
     }
   });
 
@@ -1605,7 +1557,7 @@
   $("#today").onclick = function () {
     TODAY = N.startOfDay(new Date());
     view = [TODAY.getFullYear(), TODAY.getMonth()]; sel = N.ymd(TODAY);
-    edit = null; adding = false; wasted = null; persist(); render();
+    edit = null; wasted = null; persist(); render();
   };
   function shift(n) {
     var d = new Date(view[0], view[1] + n, 1);
@@ -1823,7 +1775,7 @@
   }
 
   $("#btnAuth").onclick = function () {
-    authOpen = true; authView = null; adding = false; renderAuth();
+    authOpen = true; authView = null; renderAuth();
     if (!IS_EXT) toast("预览模式：可以填地址，但授权与抓取需要装成扩展");
   };
   $("#closeAuth").onclick = function () { authDlg.close(); };

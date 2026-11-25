@@ -255,7 +255,7 @@ eq("未过期的冻结批次 status 回到 active", frozenFuture.batches[0].stat
 
 /* ---------- 编辑路径的校验（v0.3.16） ----------
  * 名称被改成空白后 dedupKey 会变成 `qoder||2026-11-01`，两笔"空名"批次互相覆盖，
- * 而 UI 上只是一片空白，看不出异常。补录路径早就有这条校验，编辑路径原来漏了。 */
+ * 而 UI 上只是一片空白，看不出异常。 */
 var editBase = N.normalizeBatch({ agent: "qoder", label: "包A", granted: 100, remaining: 50, expiry: "2026-11-01" });
 eq("把名称改成空白：拒绝保存", N.applyManualEdit(editBase, { label: "   " }), null);
 eq("把名称改成空串：拒绝保存", N.applyManualEdit(editBase, { label: "" }), null);

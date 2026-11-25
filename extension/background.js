@@ -207,9 +207,8 @@ function unregister(origin) {
  * 这个函数在**每次 service worker 唤醒**时都会跑（顶层调用），所以它必须
  * 「先读后判」：以前无条件 CreditStore.update() = 整份文档 load + 序列化 + set，
  * 哪怕三个字段早就是目标值。那次写入会通过 chrome.storage.onChanged 唤醒扩展页，
- * 而扩展页收到变更就重画 —— 用户正在填「补录批次」表单时（renderAdd 没有编辑标记），
- * 另一个标签页加载一次 workbuddy.cn 的心跳就能把它连同已输入的内容冲掉。
- * 现在已是目标状态就直接返回，不写、不惊动 UI。
+ * 而扩展页收到变更就重画 —— 用户正在编辑批次时，另一个标签页加载一次
+ * workbuddy.cn 的心跳就能惊动界面。现在已是目标状态就直接返回，不写、不惊动 UI。
  *
  * 注：load() 会过 migrate()，而 migrate 对 direct 平台已经强制这三项
  * （fetchMode=direct / hookActive=false / origin=代码值），所以对今天的 Qoder 来说
@@ -1569,8 +1568,7 @@ async function directFetchInPage(cfg) {
  *
  * Qoder 直读，LobsterAI / TRAE / WorkBuddy 截获都已接入；WorkBuddy 当前只映射
  * 免费/赠送包接口。这一步刻意不猜字段：猜出来的批次看起来跟真抓的一模一样，
- * 错了也没人发现。没有 adapter 的平台仍会回 no-adapter 并说明原因；
- * 手动录入不依赖 adapter，永远可用。
+ * 错了也没人发现。没有 adapter 的平台仍会回 no-adapter 并说明原因。
  */
 function syncOne(agentId, now) {
   return CreditStore.load().then(function (doc) {
@@ -1653,7 +1651,7 @@ function syncAll(now) {
         ok: false, reason: "no-adapter", ran: [],
         message: authed.length
           ? "已授权 " + authed.length + " 个平台，但字段映射还没写。导出捕获样本给我，我按样本写 adapters。"
-          : "还没有授权任何平台。可以先手动录入，或在「授权与样本」里走授权截获。"
+          : "还没有授权任何平台。请先在「授权与样本」里走授权截获。"
       };
     }
     emitSyncProgress({ type: "SYNC_PROGRESS", phase: "start", total: ids.length });

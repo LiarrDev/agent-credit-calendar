@@ -506,7 +506,7 @@
    * 返回 null 表示这次修改不合法（名称改成了空白），调用方应保留原批次并提示。
    * 为什么必须在这里挡：dedupKey 里含 label，名称被改成空白后键会变成
    * `qoder||2026-11-01`，两笔"空名"批次互相覆盖，而在 UI 上只是一片空白，
-   * 看不出异常。补录路径早就有这条校验，编辑路径原来漏了。
+   * 看不出异常。
    */
   function applyManualEdit(batch, patch) {
     patch = Object.assign({}, patch || {});
